@@ -363,11 +363,13 @@ select.input option {
 .op-chip:hover { border-color: #4a4a52; }
 
 .op-chip[aria-pressed="true"] {
-  background: var(--accent-tint);
-  border-color: var(--accent-dim);
-  color: var(--accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14141c;
   font-weight: 600;
 }
+
+.op-chip[aria-pressed="true"]:hover { background: #9ca3fa; border-color: #9ca3fa; }
 
 .op-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
