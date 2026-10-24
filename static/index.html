@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seq2formula — поиск формулы</title>
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<link rel="stylesheet" href="/static/style.css?v=3">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M18 5H8l6 7-6 7h10"/>
+    </svg>
+    <span class="brand-name">seq2formula</span>
+  </div>
+  <nav class="pagetabs" role="tablist" aria-label="Разделы">
+    <button class="ptab" id="ptabSearch" role="tab" aria-selected="true">Поиск</button>
+    <button class="ptab" id="ptabResults" role="tab" aria-selected="false">
+      Результаты <span class="tab-dot" id="resultsDot" hidden></span>
+    </button>
+  </nav>
+  <div class="topbar-status" id="connStatus"><span class="dot" id="connDot"></span><span id="connText">подключение…</span></div>
+</header>
+
+<main class="canvas">
+  <section id="paneSearch" aria-label="Поиск">
+    <!-- ===== Run control ===== -->
+    <section class="panel control-panel" aria-label="Управление поиском">
+      <form id="runForm" class="run-form">
+        <label class="field field-seq">
+          <span class="field-label">Последовательность</span>
+          <input id="seqInput" class="input" type="text" inputmode="numeric"
+                 placeholder="например: 1 2 4 8 16" autocomplete="off"
+                 aria-describedby="seqHint">
+          <span class="field-hint" id="seqHint">2–32 числа через пробел или запятую</span>
+        </label>
+        <label class="field field-puzzle">
+          <span class="field-label">Или загадка из библиотеки</span>
+          <select id="puzzleSelect" class="input" aria-label="Загадка из библиотеки">
+            <option value="">— своя последовательность —</option>
+          </select>
+        </label>
+        <button type="submit" class="btn btn-primary" id="startBtn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          Запустить
+        </button>
+      </form>
+      <div class="run-controls" id="runControls" hidden>
+        <div class="control-group" role="group" aria-label="Управление прогоном">
+          <button class="btn" id="pauseBtn" aria-label="Пауза">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+            <span id="pauseLabel">Пауза</span>
+          </button>
+          <button class="btn" id="stepBtn" aria-label="Шаг">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+            Шаг
+          </button>
+          <button class="btn" id="stopBtn" aria-label="Остановить">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+            Стоп
+          </button>
+        </div>
+        <label class="speed field-inline">
+          <span class="field-label">Скорость</span>
+          <input type="range" id="speedRange" min="1" max="40" step="1" value="10">
+          <span class="num" id="speedValue">10 поколений/с</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- ===== Live search ===== -->
+    <section class="panel live-panel" aria-label="Текущий поиск">
+      <div class="panel-head">
+        <h2 class="panel-title">Текущий поиск</h2>
+        <span class="head-right">
+          <span class="chip" id="liveChip">нет прогона</span>
+        </span>
+      </div>
+      <div class="solved-note" id="solvedNote"></div>
+      <div class="live-empty" id="liveEmpty">
+        Введите последовательность или выберите загадку и запустите поиск.
+      </div>
+      <div class="live-grid" id="liveGrid" hidden>
+        <div class="formula-hero">
+          <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span></div>
+          <div class="hero-formula" id="bestFormula" aria-live="polite"></div>
+          <div class="hero-sub num" id="bestSub"></div>
+        </div>
+        <div class="kpi-strip" id="kpiStrip">
+          <div class="kpi"><span class="kpi-label">Поколение</span><span class="kpi-value num" id="kpiGen">—</span></div>
+          <div class="kpi"><span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="kpiError">—</span></div>
+          <div class="kpi"><span class="kpi-label">Размер формулы</span><span class="kpi-value num" id="kpiSize">—</span></div>
+          <div class="kpi"><span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
+          <div class="kpi"><span class="kpi-label">Скорость</span><span class="kpi-value num" id="kpiGps">—</span></div>
+          <div class="kpi"><span class="kpi-label">Время</span><span class="kpi-value num" id="kpiTime">—</span></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3 class="chart-title">Fitness по поколениям</h3></div>
+          <div class="chart" id="chartFitness"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3 class="chart-title">Ошибка по поколениям</h3></div>
+          <div class="chart" id="chartError"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3 class="chart-title">Разнообразие популяции</h3></div>
+          <div class="chart" id="chartDiversity"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3 class="chart-title">Размеры деревьев</h3></div>
+          <div class="chart" id="chartSizes"></div>
+        </div>
+        <div class="terms-card">
+          <div class="chart-head"><h3 class="chart-title">Значения по членам</h3></div>
+          <div class="terms-wrap">
+            <table class="terms-table" id="termsTable">
+              <thead><tr id="termsHead"></tr></thead>
+              <tbody>
+                <tr id="termsTarget"></tr>
+                <tr id="termsGot"></tr>
+                <tr id="termsErr"></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="terms-empty" id="termsEmpty" hidden>—</div>
+        </div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ===== Results: history / hall / curiosities ===== -->
+  <section id="paneResults" hidden aria-label="Результаты">
+    <section class="panel results-panel" aria-label="Результаты">
+      <div class="panel-head">
+        <h2 class="panel-title">Результаты</h2>
+        <span class="panel-meta" id="resultsMeta"></span>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Результаты">
+        <button class="tab" role="tab" id="tabHistory" aria-selected="true">История</button>
+        <button class="tab" role="tab" id="tabHall" aria-selected="false">Зал славы</button>
+        <button class="tab" role="tab" id="tabCurio" aria-selected="false">Курьёзы</button>
+      </div>
+      <div class="tab-body" id="tabBody">
+        <table class="list-table" id="historyTable">
+          <thead><tr><th>Когда</th><th>Последовательность</th><th>Формула</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
+          <tbody id="historyRows"></tbody>
+        </table>
+        <table class="list-table" id="hallTable" hidden>
+          <thead><tr><th>Последовательность</th><th>Самая короткая формула</th><th class="num">Размер</th></tr></thead>
+          <tbody id="hallRows"></tbody>
+        </table>
+        <div id="curioList" hidden></div>
+      </div>
+    </section>
+  </section>
+</main>
+
+<footer class="footer">
+  <span>seq2formula — локальный поиск формул. Этап 1: генетическое программирование.</span>
+</footer>
+
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
+<script src="/static/app.js?v=3"></script>
+</body>
+</html>
