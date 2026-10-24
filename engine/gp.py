@@ -18,8 +18,9 @@ import time
 from dataclasses import dataclass, field
 
 from .fitness import Score, INVALID_FITNESS, score_candidate
-from .grammar import (MAX_INIT_DEPTH, crossover, initial_population,
-                      point_mutation, shrink_mutation, subtree_mutation)
+from .grammar import (BINARY_OPS, MAX_INIT_DEPTH, crossover,
+                      initial_population, point_mutation, shrink_mutation,
+                      subtree_mutation)
 from .nodes import Node, size, to_dict, to_text
 
 # Curiosity gallery: "almost correct" (mean error below) but comically
@@ -53,6 +54,7 @@ class GPConfig:
     parsimony: float = 0.003
     max_generations: int = 1000
     seed: int | None = None
+    allowed_ops: tuple[str, ...] | None = None  # None = all BINARY_OPS
 
 
 @dataclass
@@ -82,14 +84,18 @@ class GenerationResult:
     new_best: bool          # fitness improved over the whole run
     solved_now: bool        # first exact hit in this generation
     solved: bool            # run has an exact formula (any past gen)
+    top: list[dict] = field(default_factory=list)  # leaderboard, best first
     stats: dict = field(default_factory=dict)
     elapsed_ms: float = 0.0
+    population: int = 0
 
     def payload(self) -> dict:
         return {
             "type": "gen",
             "gen": self.gen,
+            "population": self.population,
             "best": self.best.payload(),
+            "top": self.top,
             "new_best": self.new_best,
             "solved_now": self.solved_now,
             "solved": self.solved,
@@ -102,10 +108,12 @@ class GPEngine:
     def __init__(self, seq: list[float], config: GPConfig | None = None):
         self.seq = [float(x) for x in seq]
         self.cfg = config or GPConfig()
+        self.ops: tuple[str, ...] = (tuple(self.cfg.allowed_ops)
+                                     if self.cfg.allowed_ops else BINARY_OPS)
         self.rng = random.Random(self.cfg.seed)
         self.generation = 0
         self.population: list[Node] = initial_population(
-            self.rng, self.cfg.population, self.cfg.max_depth)
+            self.rng, self.cfg.population, self.cfg.max_depth, self.ops)
         self.best_ever: Best | None = None
         self.shortest_exact: Best | None = None
         self.solved = False
@@ -160,14 +168,26 @@ class GPEngine:
                 self.shortest_exact = Best(node, sc)
 
         self._collect_curiosities(scored)
+        top = []
+        for node, sc in scored[:5]:
+            top.append({
+                "text": to_text(node),
+                "ast": to_dict(node),
+                "fitness": round(sc.fitness, 6),
+                "size": sc.size,
+                "error": None if sc.error == float("inf")
+                         else round(sc.error, 8),
+            })
         result = GenerationResult(
             gen=self.generation,
             best=Best(best_node, best_score),
             new_best=new_best,
             solved_now=solved_now,
             solved=self.solved,
+            top=top,
             stats=stats,
             elapsed_ms=(time.perf_counter() - started) * 1000.0,
+            population=self.cfg.population,
         )
         self.generation += 1
         self.population = self._breed(scored)
@@ -191,7 +211,8 @@ class GPEngine:
         while len(elite) + len(offspring) < cfg.population:
             a = self._tournament(scored)
             if self.rng.random() < cfg.p_crossover:
-                child = crossover(self.rng, a, self._tournament(scored), cfg.max_depth)
+                child = crossover(self.rng, a, self._tournament(scored),
+                                  cfg.max_depth, self.ops)
             else:
                 child = a
             if self.solved:
@@ -199,12 +220,12 @@ class GPEngine:
                 if self.rng.random() < 0.4:
                     child = shrink_mutation(self.rng, child)
                 if self.rng.random() < cfg.p_mutate:
-                    child = subtree_mutation(self.rng, child, cfg.max_depth)
+                    child = subtree_mutation(self.rng, child, cfg.max_depth, self.ops)
             else:
                 if self.rng.random() < cfg.p_mutate:
-                    child = subtree_mutation(self.rng, child, cfg.max_depth)
+                    child = subtree_mutation(self.rng, child, cfg.max_depth, self.ops)
                 if self.rng.random() < 0.05:
-                    child = point_mutation(self.rng, child)
+                    child = point_mutation(self.rng, child, self.ops)
             offspring.append(child)
         return elite + offspring
 

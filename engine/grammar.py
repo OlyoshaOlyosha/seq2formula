@@ -39,23 +39,25 @@ def _rand_base(rng: random.Random) -> Const:
     return Const(float(rng.randint(*BASE_RANGE)))
 
 
-def random_tree(rng: random.Random, max_depth: int, method: str = "grow") -> Node:
+def random_tree(rng: random.Random, max_depth: int, method: str = "grow",
+                ops: tuple[str, ...] = BINARY_OPS) -> Node:
     """Random tree of depth at most max_depth; method 'full' builds op
     nodes to the limit, 'grow' may terminate a branch early (the
-    classic half-and-half pair). max_depth counts nodes, so 1 = leaf."""
+    classic half-and-half pair). max_depth counts nodes, so 1 = leaf.
+    ops limits which binary operators may appear."""
     if max_depth <= 1 or (method == "grow" and rng.random() < 0.25):
         return VAR if rng.random() < 0.5 else _rand_const(rng)
-    op = rng.choice(BINARY_OPS)
+    op = rng.choice(ops)
     if op == "^":
         if rng.random() < 0.5:  # n^k form: constant exponent
-            left = random_tree(rng, max_depth - 1, method)
+            left = random_tree(rng, max_depth - 1, method, ops)
             right = _rand_exp(rng)
         else:  # k^n form: constant base
             left = _rand_base(rng)
-            right = random_tree(rng, max_depth - 1, method)
+            right = random_tree(rng, max_depth - 1, method, ops)
         return BinOp(op, left, right)
-    left = random_tree(rng, max_depth - 1, method)
-    right = random_tree(rng, max_depth - 1, method)
+    left = random_tree(rng, max_depth - 1, method, ops)
+    right = random_tree(rng, max_depth - 1, method, ops)
     return BinOp(op, left, right)
 
 
@@ -100,40 +102,48 @@ def random_path(rng: random.Random, node: Node) -> tuple[int, ...]:
     return rng.choice(list(_all_paths(node)))
 
 
-def ensure_grammar(node: Node, rng: random.Random) -> Node:
+def ensure_grammar(node: Node, rng: random.Random,
+                   ops: tuple[str, ...] = BINARY_OPS) -> Node:
     """Post-crossover repair: ^ must keep a constant on one side. A splice
     can leave n*n under a ^; re-roll a constant exponent rather than
-    rejecting the child (keeps operator flow simple)."""
+    rejecting the child (keeps operator flow simple). When ^ is disabled
+    entirely, a bare ^ swaps to an allowed operator."""
     if isinstance(node, BinOp):
-        left = ensure_grammar(node.left, rng)
-        right = ensure_grammar(node.right, rng)
-        if (node.op == "^" and not isinstance(left, Const)
-                and not isinstance(right, Const)):
-            right = _rand_exp(rng)
+        left = ensure_grammar(node.left, rng, ops)
+        right = ensure_grammar(node.right, rng, ops)
+        if node.op == "^" and not isinstance(left, Const) \
+                and not isinstance(right, Const):
+            if "^" in ops:
+                right = _rand_exp(rng)
+            else:
+                return BinOp(rng.choice(ops), left, right)
         return BinOp(node.op, left, right)
     if isinstance(node, Neg):
-        return Neg(ensure_grammar(node.child, rng))
+        return Neg(ensure_grammar(node.child, rng, ops))
     return node
 
 
 def initial_population(rng: random.Random, pop_size: int,
-                       max_depth: int = MAX_INIT_DEPTH) -> list[Node]:
+                       max_depth: int = MAX_INIT_DEPTH,
+                       ops: tuple[str, ...] = BINARY_OPS) -> list[Node]:
     """Ramped half-and-half: depths cycle 2..max_depth, alternating
     full/grow, so generation 0 mixes shallow and deep trees."""
     population = []
     depths = list(range(2, max_depth + 1))
     for i in range(pop_size):
         method = "full" if i % 2 == 0 else "grow"
-        population.append(random_tree(rng, depths[i % len(depths)], method))
+        population.append(
+            random_tree(rng, depths[i % len(depths)], method, ops))
     return population
 
 
 def subtree_mutation(rng: random.Random, tree: Node,
-                     max_depth: int = MAX_INIT_DEPTH) -> Node:
+                     max_depth: int = MAX_INIT_DEPTH,
+                     ops: tuple[str, ...] = BINARY_OPS) -> Node:
     path = random_path(rng, tree)
     budget = max(1, max_depth - len(path))
-    replacement = random_tree(rng, min(3, budget))
-    return ensure_grammar(replace_subtree(tree, path, replacement), rng)
+    replacement = random_tree(rng, min(3, budget), "grow", ops)
+    return ensure_grammar(replace_subtree(tree, path, replacement), rng, ops)
 
 
 def shrink_mutation(rng: random.Random, tree: Node) -> Node:
@@ -145,15 +155,16 @@ def shrink_mutation(rng: random.Random, tree: Node) -> Node:
     return replace_subtree(tree, path, replacement)
 
 
-def point_mutation(rng: random.Random, tree: Node) -> Node:
+def point_mutation(rng: random.Random, tree: Node,
+                   ops: tuple[str, ...] = BINARY_OPS) -> Node:
     """Swap one node in place: a constant value, or an operator (with the
-    ^ exponent rule re-checked)."""
+    ^ constant rule re-checked)."""
     path = random_path(rng, tree)
     target = subtree_at(tree, path)
     if isinstance(target, Const):
         new = _rand_const(rng)
     elif isinstance(target, BinOp):
-        op = rng.choice(BINARY_OPS)
+        op = rng.choice(ops)
         left, right = target.left, target.right
         if (op == "^" and not isinstance(left, Const)
                 and not isinstance(right, Const)):
@@ -167,12 +178,13 @@ def point_mutation(rng: random.Random, tree: Node) -> Node:
 
 
 def crossover(rng: random.Random, a: Node, b: Node,
-              max_depth: int = MAX_INIT_DEPTH) -> Node:
+              max_depth: int = MAX_INIT_DEPTH,
+              ops: tuple[str, ...] = BINARY_OPS) -> Node:
     """Subtree swap; retries a few times to respect the depth limit,
     falls back to a copy of parent a (elitism still guards progress)."""
     for _ in range(6):
         child = replace_subtree(a, random_path(rng, a), subtree_at(b, random_path(rng, b)))
-        child = ensure_grammar(child, rng)
+        child = ensure_grammar(child, rng, ops)
         if depth(child) <= max_depth:
             return child
     return a

@@ -19,6 +19,8 @@ showing, no network access is used or required.
 
 - Candidate formulas are expression trees over a small grammar: `n`,
   numeric constants, `+ - * /`, `^`.
+- You choose which operators the search may use — turn any of them off
+  and watch how (or whether) the evolution finds another route.
 - Fitness combines **accuracy** (a candidate is evaluated on n = 1..N; the
   closer the values to the target sequence, the better) with **parsimony**
   (shorter formulas win ties, which keeps solutions readable and prevents
@@ -30,11 +32,12 @@ showing, no network access is used or required.
 ## Dashboard
 
 The search is observable end to end: current best formula (rendered with
-KaTeX), fitness dynamics per generation, population diversity, tree-size
-distribution, per-term errors, a history of solved puzzles, a hall of fame
-of the shortest formulas, and a gallery of curious near-misses. A run can
-be paused, stepped through generation by generation, or accelerated at any
-time.
+KaTeX), a top-5 leaderboard of the current generation, a live event feed
+(new records, exact hits, formula shrinking), fitness and error dynamics
+per generation, population diversity, tree-size distribution, per-term
+error tables, a history of solved puzzles, a hall of fame of the shortest
+formulas, and a gallery of curious near-misses. A run can be paused,
+stepped through generation by generation, or accelerated at any time.
 
 ## Getting started
 
@@ -54,13 +57,15 @@ run.bat
 
 Experimental, in continuous development.
 
-- Stage 1 (in progress) — genetic programming engine, live dashboard,
-  built-in puzzle library of graded difficulty.
-- Stage 2 — reinforcement-learning engine that assembles formulas step by
-  step and is trained live, per puzzle; trained policies are saved, reused
-  and compared.
-- Later — grammar growth (`sqrt`, factorial, fractions, recurrences), more
-  statistics, experiments with engine parameters.
+- Stage 1 (done) — genetic programming engine with a post-solution
+  "shrink" phase, live dashboard, operator picker, built-in puzzle
+  library of graded difficulty.
+- Stage 2 (next) — reinforcement-learning engine that assembles formulas
+  step by step and is trained live, per puzzle; trained policies are
+  saved, reused and compared.
+- Later — grammar growth (π, `sqrt`, trigonometry, factorial, fractions,
+  recurrences; the operator picker will cover the new operations too),
+  more statistics, experiments with engine parameters.
 
 ## Notes
 

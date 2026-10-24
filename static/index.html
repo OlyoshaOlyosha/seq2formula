@@ -6,7 +6,7 @@
 <title>seq2formula — поиск формулы</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <header class="topbar">
@@ -43,23 +43,24 @@
           <select id="puzzleSelect" class="input" aria-label="Загадка из библиотеки">
             <option value="">— своя последовательность —</option>
           </select>
+          <span class="field-hint">18 загадок трёх уровней сложности</span>
         </label>
-        <button type="submit" class="btn btn-primary" id="startBtn">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-          Запустить
-        </button>
       </form>
-      <div class="run-controls" id="runControls" hidden>
-        <div class="control-group" role="group" aria-label="Управление прогоном">
-          <button class="btn" id="pauseBtn" aria-label="Пауза">
+      <div class="run-controls" id="runControls">
+        <div class="control-group" role="group" aria-label="Управление поиском">
+          <button type="submit" form="runForm" class="btn btn-primary" id="startBtn">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+            Запустить
+          </button>
+          <button class="btn" id="pauseBtn" aria-label="Пауза" disabled>
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
             <span id="pauseLabel">Пауза</span>
           </button>
-          <button class="btn" id="stepBtn" aria-label="Шаг">
+          <button class="btn" id="stepBtn" aria-label="Шаг" disabled>
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
             Шаг
           </button>
-          <button class="btn" id="stopBtn" aria-label="Остановить">
+          <button class="btn" id="stopBtn" aria-label="Остановить" disabled>
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
             Стоп
           </button>
@@ -69,6 +70,19 @@
           <input type="range" id="speedRange" min="1" max="40" step="1" value="10">
           <span class="num" id="speedValue">10 поколений/с</span>
         </label>
+      </div>
+      <div class="ops-row" id="opsRow" role="group" aria-label="Операции, доступные эволюции">
+        <span class="ops-label">Операции формул
+          <span class="ops-hint">включай и выключай — применяются к следующему запуску</span>
+        </span>
+        <div class="op-chips">
+          <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
+          <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
+          <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="умножение">×</button>
+          <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="деление">÷</button>
+          <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="возведение в степень">xʸ</button>
+          <span class="field-hint" id="opsWarn" hidden>нужна хотя бы одна операция</span>
+        </div>
       </div>
     </section>
 
@@ -91,12 +105,18 @@
           <div class="hero-sub num" id="bestSub"></div>
         </div>
         <div class="kpi-strip" id="kpiStrip">
-          <div class="kpi"><span class="kpi-label">Поколение</span><span class="kpi-value num" id="kpiGen">—</span></div>
-          <div class="kpi"><span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="kpiError">—</span></div>
-          <div class="kpi"><span class="kpi-label">Размер формулы</span><span class="kpi-value num" id="kpiSize">—</span></div>
-          <div class="kpi"><span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
-          <div class="kpi"><span class="kpi-label">Скорость</span><span class="kpi-value num" id="kpiGps">—</span></div>
-          <div class="kpi"><span class="kpi-label">Время</span><span class="kpi-value num" id="kpiTime">—</span></div>
+          <div class="kpi" data-tip="Номер шага эволюции: каждое поколение отбирает лучшие формулы и выводит из них следующее поколение">
+            <span class="kpi-label">Поколение</span><span class="kpi-value num" id="kpiGen">—</span></div>
+          <div class="kpi" data-tip="Насколько лучшая формула промахивается в среднем по всем членам; 0% — точное совпадение по значениям">
+            <span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="kpiError">—</span></div>
+          <div class="kpi" data-tip="Число узлов в дереве формулы (n, 2, +, ^ и т.д.); короче = проще, по нему выбирают чемпиона зала славы">
+            <span class="kpi-label">Размер формулы</span><span class="kpi-value num" id="kpiSize">—</span></div>
+          <div class="kpi" data-tip="Доля формул в популяции, дающих разные значения; 100% — все разные, 0% — выродились в копии">
+            <span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
+          <div class="kpi" data-tip="Сколько формул эволюция успела проверить с начала прогона">
+            <span class="kpi-label">Проверено формул</span><span class="kpi-value num" id="kpiEvaluated">—</span></div>
+          <div class="kpi" data-tip="Фактическая скорость поиска и длительность текущего прогона">
+            <span class="kpi-label">Скорость / время</span><span class="kpi-value num kpi-small" id="kpiSpeedTime">—</span></div>
         </div>
         <div class="chart-card">
           <div class="chart-head"><h3 class="chart-title">Fitness по поколениям</h3></div>
@@ -115,7 +135,11 @@
           <div class="chart" id="chartSizes"></div>
         </div>
         <div class="terms-card">
-          <div class="chart-head"><h3 class="chart-title">Значения по членам</h3></div>
+          <div class="chart-head">
+            <h3 class="chart-title">Проверка по членам</h3>
+            <p class="chart-note">Формула вычисляется при n = 1, 2, 3…: «цель» — что должно получиться,
+            «кандидат» — что даёт формула, «ошибка» — расхождение</p>
+          </div>
           <div class="terms-wrap">
             <table class="terms-table" id="termsTable">
               <thead><tr id="termsHead"></tr></thead>
@@ -127,6 +151,12 @@
             </table>
           </div>
           <div class="terms-empty" id="termsEmpty" hidden>—</div>
+        </div>
+        <div class="race-card">
+          <div class="chart-head"><h3 class="chart-title">Топ формул поколения</h3></div>
+          <ol class="race-list" id="raceList"></ol>
+          <div class="chart-head race-log-head"><h3 class="chart-title">Хроника поиска</h3></div>
+          <ul class="race-log" id="raceLog"></ul>
         </div>
       </div>
     </section>
@@ -165,6 +195,6 @@
 
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

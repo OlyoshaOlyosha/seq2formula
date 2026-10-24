@@ -203,9 +203,9 @@ body {
 
 .run-form {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) auto;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 12px;
-  align-items: end;
+  align-items: start;
 }
 
 .field { display: grid; gap: 6px; min-width: 0; }
@@ -228,6 +228,49 @@ body {
 .input:hover { border-color: #4a4a52; }
 
 .input:focus { outline: none; border-color: var(--accent); }
+
+/* the puzzle select: drop the native arrow, draw our own */
+select.input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23b4b4ba' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+select.input option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* KPI tooltips */
+
+.kpi { position: relative; cursor: help; }
+
+.kpi::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 8px;
+  right: 8px;
+  z-index: 20;
+  background: var(--raised);
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--muted);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms;
+}
+
+.kpi:hover::after, .kpi:focus-within::after { opacity: 1; }
 
 .btn {
   display: inline-flex;
@@ -271,7 +314,62 @@ body {
   border-top: 1px solid var(--rule);
 }
 
-.control-group { display: flex; gap: 8px; }
+.control-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* operation picker chips */
+
+.ops-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+
+.ops-label {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ops-hint { color: var(--faint); font-size: var(--fs-small); font-weight: 400; }
+
+.op-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.op-chip {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--control);
+  background: var(--raised);
+  color: var(--faint);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background-color 150ms, color 150ms, border-color 150ms;
+}
+
+.op-chip:hover { border-color: #4a4a52; }
+
+.op-chip[aria-pressed="true"] {
+  background: var(--accent-tint);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.op-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .field-inline {
   display: flex;
@@ -371,7 +469,9 @@ input[type="range"] {
 
 .kpi-teal { color: var(--teal); }
 
-.chart-card, .terms-card { min-width: 0; }
+.kpi-small { font-size: 15px; font-weight: 400; }
+
+.chart-card, .terms-card, .race-card { min-width: 0; }
 
 .chart-head { margin-bottom: 10px; }
 
@@ -382,7 +482,82 @@ input[type="range"] {
   color: var(--text);
 }
 
+.chart-note {
+  margin: 4px 0 0;
+  font-size: var(--fs-small);
+  color: var(--faint);
+}
+
 .chart { width: 100%; }
+
+/* race: top-5 leaderboard and the event feed */
+
+.race-list {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+}
+
+.race-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: var(--radius-control);
+}
+
+.race-item.leader { background: var(--accent-tint); }
+
+.race-place {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--active);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+.race-item.leader .race-place {
+  background: var(--accent);
+  color: #14141c;
+  font-weight: 600;
+}
+
+.race-formula { flex: 1; min-width: 0; overflow-x: auto; padding: 2px 0; }
+
+.race-formula .katex { font-size: 1em; }
+
+.race-meta { flex: none; font-size: var(--fs-small); color: var(--muted); }
+
+.race-log-head { margin-top: 10px; }
+
+.race-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.race-log-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+}
+
+.race-log-item:last-child { border-bottom: none; }
+
+.race-log-gen { flex: none; color: var(--faint); min-width: 64px; }
+
+.race-log-item.log-solved { color: var(--positive); }
+
+.race-log-item.log-shrink { color: var(--teal); }
 
 /* uPlot theming */
 .uplot, .uplot *, .uplot *::before, .uplot *::after { box-sizing: border-box; }
@@ -395,7 +570,7 @@ input[type="range"] {
 .uplot .legend .series:first-child { display: none; } /* hide x column */
 .uplot .axis { color: var(--faint); font-size: 11px; }
 .u-legend { color: var(--muted); font-size: var(--fs-small); padding-top: 6px; }
-.u-val { color: var(--text); }
+.u-legend .u-value { color: var(--text); }
 .u-off { color: var(--faint); }
 
 /* ---------- terms table ---------- */
@@ -532,7 +707,7 @@ input[type="range"] {
 
 @media (max-width: 900px) {
   .run-form { grid-template-columns: 1fr; align-items: stretch; }
-  .run-form .btn { width: 100%; }
+
   .live-grid { grid-template-columns: 1fr; }
   .kpi-strip { grid-template-columns: repeat(3, 1fr); }
   .kpi:nth-child(3n+1) { border-left: none; }

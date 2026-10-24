@@ -16,6 +16,10 @@ const state = {
   lastFormulaText: "",
   charts: {},
   rafPending: false,
+  raceLog: [],             // event feed entries, newest first
+  lastGenNum: null,
+  lastExactSize: Infinity,
+  ops: new Set(["+", "-", "*", "/", "^"]),  // enabled binary operators
 };
 
 /* ---------- formatting ---------- */
@@ -129,6 +133,9 @@ const CHART_COLORS = {
 
 function axisOpts(digits = 0) {
   return {
+    // stroke colors both the axis line and the tick labels; without it
+    // uPlot draws black labels that vanish on the dark theme
+    stroke: CHART_COLORS.faint,
     grid: { stroke: CHART_COLORS.grid },
     ticks: { stroke: CHART_COLORS.grid },
     values: (u, vals) => vals.map((v) =>
@@ -224,6 +231,10 @@ function resetBuffers() {
   };
   state.lastFormulaText = "";
   state.genTimestamps = [];
+  state.raceLog = [];
+  state.lastExactSize = Infinity;
+  state.lastGenNum = null;
+  renderRaceLog();
 }
 
 function scheduleChartUpdate() {
@@ -252,13 +263,20 @@ function setChip(text, cls) {
 function setStatus(status) {
   state.status = status;
   const running = status === "running" || status === "paused" || status === "finished";
-  $("runControls").hidden = !running;
   $("liveEmpty").hidden = running;
   $("liveGrid").hidden = !running;
   const pauseBtn = $("pauseBtn");
-  pauseBtn.disabled = status === "finished";
-  $("stepBtn").disabled = status === "running" || status === "finished";
-  $("stopBtn").disabled = status === "finished";
+  const stepBtn = $("stepBtn");
+  const stopBtn = $("stopBtn");
+  const startBtn = $("startBtn");
+  pauseBtn.disabled = status !== "running" && status !== "paused";
+  stepBtn.disabled = status === "running" || status === "finished";
+  stopBtn.disabled = status !== "running" && status !== "paused";
+  startBtn.disabled = status === "running" || status === "paused";
+  // operator chips apply to the next run — locked while one is live
+  document.querySelectorAll(".op-chip").forEach((chip) => {
+    chip.disabled = status === "running" || status === "paused";
+  });
   $("pauseLabel").textContent = status === "paused" ? "Продолжить" : "Пауза";
   if (status === "running") setChip("поиск идёт", "run");
   else if (status === "paused") setChip("пауза", "paused");
@@ -286,16 +304,17 @@ function applyGen(msg) {
   errEl.classList.toggle("ok", msg.best.error !== null && msg.best.error < 1e-9);
   $("kpiSize").textContent = String(msg.best.size);
   $("kpiDiversity").textContent = fmtPercent(s.diversity);
+  $("kpiEvaluated").textContent =
+    ((msg.gen + 1) * (msg.population || 500)).toLocaleString("ru-RU");
   const now = performance.now();
   state.genTimestamps.push(now);
   while (state.genTimestamps.length > 1 &&
          now - state.genTimestamps[0] > 2000) state.genTimestamps.shift();
   const span = (now - state.genTimestamps[0]) / 1000;
-  $("kpiGps").textContent = state.genTimestamps.length > 1 && span > 0.3
+  const gps = state.genTimestamps.length > 1 && span > 0.3
     ? fmtNum((state.genTimestamps.length - 1) / span) + " пок/с" : "—";
-  if (state.runStartedAt) {
-    $("kpiTime").textContent = fmtTime((now - state.runStartedAt) / 1000);
-  }
+  const elapsed = state.runStartedAt ? fmtTime((now - state.runStartedAt) / 1000) : "—";
+  $("kpiSpeedTime").textContent = `${gps} · ${elapsed}`;
 
   // hero formula: re-render only when the text changes
   if (msg.best.text !== state.lastFormulaText) {
@@ -309,8 +328,70 @@ function applyGen(msg) {
   $("heroLabel").textContent = msg.solved && !msg.solved_now
     ? "Лучшая формула (усадка — ищем короче)" : "Лучшая формула";
 
+  renderTop(msg.top || []);
+  updateRaceLog(msg);
   renderTerms(msg.best);
   scheduleChartUpdate();
+}
+
+function renderTop(top) {
+  const list = $("raceList");
+  list.innerHTML = "";
+  top.forEach((item, i) => {
+    const li = document.createElement("li");
+    li.className = "race-item" + (i === 0 ? " leader" : "");
+    const place = document.createElement("span");
+    place.className = "race-place num";
+    place.textContent = String(i + 1);
+    li.appendChild(place);
+    const f = document.createElement("span");
+    f.className = "race-formula";
+    renderKatex(f, astToLatex(item.ast), false);
+    li.appendChild(f);
+    const meta = document.createElement("span");
+    meta.className = "race-meta num";
+    meta.textContent = `fit ${fmtNum(item.fitness)} · узлов ${item.size}`;
+    li.appendChild(meta);
+    list.appendChild(li);
+  });
+}
+
+function pushLogEntry(text, cls) {
+  state.raceLog.unshift({ text, cls, gen: state.lastGenNum });
+  if (state.raceLog.length > 7) state.raceLog.pop();
+  renderRaceLog();
+}
+
+function renderRaceLog() {
+  const list = $("raceLog");
+  list.innerHTML = "";
+  state.raceLog.forEach((e) => {
+    const li = document.createElement("li");
+    li.className = "race-log-item" + (e.cls ? " " + e.cls : "");
+    const g = document.createElement("span");
+    g.className = "race-log-gen num";
+    g.textContent = e.gen === null || e.gen === undefined ? "—" : "пок. " + e.gen;
+    li.appendChild(g);
+    const t = document.createElement("span");
+    t.textContent = e.text;
+    li.appendChild(t);
+    list.appendChild(li);
+  });
+}
+
+function updateRaceLog(msg) {
+  state.lastGenNum = msg.gen;
+  if (msg.solved_now) {
+    pushLogEntry("точное совпадение найдено", "log-solved");
+  } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
+    pushLogEntry(`усадка: формула короче — ${msg.best.size} узлов`, "log-shrink");
+  }
+  state.lastExactSize = msg.best.exact ? msg.best.size : state.lastExactSize;
+  if (msg.new_best && !msg.best.exact) {
+    pushLogEntry(`новая лучшая: ${msg.best.text} (ошибка ${fmtPercent(msg.best.error)})`);
+  } else if (msg.new_best && msg.best.exact && !msg.solved_now) {
+    pushLogEntry(`новая лучшая: ${msg.best.text}`);
+  }
 }
 
 function renderTerms(best) {
@@ -363,6 +444,9 @@ function applySolved(msg) {
   setStatus("finished");
   setChip("решено", "solved");
   $("resultsDot").hidden = false;
+  pushLogEntry(
+    `решено: ${msg.formula_text || "—"} — ${msg.generations} поколений, ${fmtTime(msg.time_s)}`,
+    "log-solved");
   if (msg.formula) {
     renderKatex($("bestFormula"), astToLatex(msg.formula), true);
   }
@@ -593,12 +677,13 @@ async function startRun(event) {
   const puzzleId = $("puzzleSelect").value || null;
   let body;
   if (puzzleId) {
-    body = { puzzle_id: puzzleId, speed: Number($("speedRange").value) };
+    body = { puzzle_id: puzzleId, speed: Number($("speedRange").value),
+             ops: [...state.ops] };
   } else {
     let terms;
     try { terms = parseTerms($("seqInput").value); }
     catch (e) { alertErr(e.message); return; }
-    body = { terms, speed: Number($("speedRange").value) };
+    body = { terms, speed: Number($("speedRange").value), ops: [...state.ops] };
   }
   try {
     const status = await api("/api/run", body);
@@ -636,6 +721,12 @@ async function setSpeed(gps) {
   catch (e) { /* speed is best-effort */ }
 }
 
+const RESULT_META = {
+  history: "последние решённые прогоны: формула, поколение, на котором найдена, и время поиска",
+  hall: "размер = число узлов в формуле; меньше — проще. Чемпион обновляется, когда эволюция найдёт короче",
+  curio: "почти правильные, но громоздкие монстры — следы блуждания эволюции",
+};
+
 function bindControls() {
   $("runForm").addEventListener("submit", startRun);
   $("seqInput").addEventListener("input", () => { $("puzzleSelect").value = ""; });
@@ -655,15 +746,19 @@ function bindControls() {
     speedTimer = setTimeout(() => setSpeed(Number(e.target.value)), 200);
   });
 
-  const tabs = [["tabHistory", "historyTable"], ["tabHall", "hallTable"], ["tabCurio", "curioList"]];
-  for (const [tabId, bodyId] of tabs) {
+  const tabs = [["tabHistory", "historyTable", "history"],
+                ["tabHall", "hallTable", "hall"],
+                ["tabCurio", "curioList", "curio"]];
+  for (const [tabId, bodyId, metaKey] of tabs) {
     $(tabId).addEventListener("click", () => {
       for (const [t, b] of tabs) {
         $(t).setAttribute("aria-selected", String(t === tabId));
         $(b).hidden = t !== tabId;
       }
+      $("resultsMeta").textContent = RESULT_META[metaKey];
     });
   }
+  $("resultsMeta").textContent = RESULT_META.history;
 
   // top-level page tabs: Поиск / Результаты
   const panes = [["ptabSearch", "paneSearch"], ["ptabResults", "paneResults"]];
@@ -678,6 +773,35 @@ function bindControls() {
         resizeCharts();
       }
     });
+  }
+
+  // operator picker: toggle chips, block a run without any operator
+  const syncOpsDisabled = () => {
+    const busy = state.status === "running" || state.status === "paused";
+    document.querySelectorAll(".op-chip").forEach((chip) => {
+      chip.disabled = busy;
+    });
+  };
+  document.querySelectorAll(".op-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const op = chip.dataset.op;
+      if (state.ops.has(op) && state.ops.size === 1) {
+        $("opsWarn").hidden = false;
+        setTimeout(() => { $("opsWarn").hidden = true; }, 2500);
+        return;
+      }
+      const on = !state.ops.has(op);
+      state.ops[on ? "add" : "delete"](op);
+      chip.setAttribute("aria-pressed", String(on));
+    });
+  });
+  syncOpsDisabled();
+
+  // re-fit charts when any chart container changes size (viewport
+  // changes and pane switches); window resize alone misses both
+  const ro = new ResizeObserver(resizeCharts);
+  for (const id of ["chartFitness", "chartError", "chartDiversity", "chartSizes"]) {
+    ro.observe($(id));
   }
 
   window.addEventListener("resize", resizeCharts);

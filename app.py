@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from engine import GPConfig, GPEngine, from_dict, to_dict, to_text
+from engine.grammar import BINARY_OPS
 from engine.gp import SHRINK_GENERATIONS
 
 ROOT = Path(__file__).resolve().parent
@@ -94,6 +95,7 @@ class RunRequest(BaseModel):
     parsimony: float = Field(default=0.003, ge=0.0, le=0.1)
     max_generations: int = Field(default=1000, ge=10, le=5000)
     speed: float = Field(default=DEFAULT_GPS, ge=0.5, le=60)
+    ops: list[str] | None = None  # subset of + - * / ^; None/omitted = all
 
 
 class ControlRequest(BaseModel):
@@ -137,10 +139,12 @@ class RunManager:
     def start(self, request: RunRequest) -> dict:
         terms, puzzle = self._resolve_terms(request)
         self.stop(reason="replaced", notify=False)
+        allowed = self._validate_ops(request.ops)
         config = GPConfig(
             population=request.population,
             parsimony=request.parsimony,
             max_generations=request.max_generations,
+            allowed_ops=allowed,
         )
         self.engine = GPEngine(terms, config)
         self.status = "running"
@@ -154,6 +158,18 @@ class RunManager:
         self.finish_reason = None
         self.task = asyncio.get_running_loop().create_task(self._loop())
         return self.snapshot()
+
+    @staticmethod
+    def _validate_ops(ops: list[str] | None) -> tuple[str, ...] | None:
+        """Operator subset for the run; None means the full set."""
+        if ops is None:
+            return None
+        if not ops:
+            raise HTTPException(422, "at least one operator must be enabled")
+        bad = [op for op in ops if op not in BINARY_OPS]
+        if bad:
+            raise HTTPException(422, f"unknown operators: {bad}")
+        return tuple(dict.fromkeys(ops))  # dedupe, keep order
 
     def _resolve_terms(self, request: RunRequest) -> tuple[list[float], dict | None]:
         if request.puzzle_id is not None:
@@ -207,6 +223,7 @@ class RunManager:
             "puzzle": ({k: self.puzzle[k] for k in ("id", "tier", "name")}
                        if self.puzzle else None),
             "generation": self.engine.generation if self.engine else 0,
+            "population": self.engine.cfg.population if self.engine else 0,
             "delay": self.delay,
             "best": self.last_gen["best"] if self.last_gen else None,
             "solved": bool(self.engine and self.engine.solved),
