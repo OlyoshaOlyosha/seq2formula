@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Local experiment data (run history, saved models)
+data/
+
+# Editor / agent tools
+.opencode/
+.zcode/
+.serena/
+.vscode/
+.idea/
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# AI project docs (local-only, never published)
+AGENTS.md
+CLAUDE.md
+tech_instructions.md
+user_instructions.md
+user_commands.md
+PRODUCT.md
+DESIGN.md
+.impeccable/
+.taste-skill/
