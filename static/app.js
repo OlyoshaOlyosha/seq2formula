@@ -19,6 +19,7 @@ const state = {
   raceLog: [],             // event feed entries, newest first
   lastGenNum: null,
   lastExactSize: Infinity,
+  lastLoggedBest: null,
   ops: new Set(["+", "-", "*", "/", "^"]),  // enabled binary operators
   settings: null,          // engine knobs from /api/settings (Настройки tab)
   settingDefaults: null,
@@ -275,6 +276,7 @@ function resetBuffers() {
   state.genTimestamps = [];
   state.raceLog = [];
   state.lastExactSize = Infinity;
+  state.lastLoggedBest = null;
   state.lastGenNum = null;
   if (state.charts.hero) state.charts.hero.setData([[], [], []]);
   renderRaceLog();
@@ -533,10 +535,20 @@ function updateRaceLog(msg) {
   }
   state.lastExactSize = msg.best.exact ? msg.best.size : state.lastExactSize;
   if (msg.new_best && !msg.best.exact) {
-    pushLogEntry({
-      pre: "новая лучшая:", latex: astToLatex(msg.best.ast),
-      text: `ошибка ${fmtPercent(msg.best.error)}`,
-    });
+    // Feed only meaningful progress: the same formula grinding out a
+    // 0.1% error win, over and over, is noise — log a formula change
+    // or a big error drop, not every fitness tick.
+    const text = msg.best.text;
+    const last = state.lastLoggedBest;
+    const bigDrop = last === null
+      || msg.best.error <= last.error * 0.9;
+    if (bigDrop || text !== last?.text) {
+      pushLogEntry({
+        pre: "новая лучшая:", latex: astToLatex(msg.best.ast),
+        text: `ошибка ${fmtPercent(msg.best.error)}`,
+      });
+      state.lastLoggedBest = { text, error: msg.best.error };
+    }
   } else if (msg.new_best && msg.best.exact && !msg.solved_now) {
     pushLogEntry({ pre: "новая лучшая:", latex: astToLatex(msg.best.ast) });
   }
@@ -550,11 +562,11 @@ function renderTerms(best) {
   addCell(head, "th", "n");
   seq.forEach((_, i) => addCell(head, "th", String(i + 1)));
 
-  buildTermsRow($("termsTarget"), "цель", seq.map(fmtNum));
+  buildTermsRow($("termsTarget"), "должно быть", seq.map(fmtNum));
   const got = best.values === null
     ? seq.map(() => "—")
     : best.values.map(fmtNum);
-  buildTermsRow($("termsGot"), "кандидат", got);
+  buildTermsRow($("termsGot"), "получается", got);
   const errRow = [];
   if (best.errors === null) {
     seq.forEach(() => errRow.push("—"));
@@ -562,7 +574,7 @@ function renderTerms(best) {
     best.errors.forEach((e) => errRow.push(e < 1e-9 ? "0" : fmtPercent(e)));
   }
   const errCells = [];
-  buildTermsRow($("termsErr"), "ошибка", errRow, errCells);
+  buildTermsRow($("termsErr"), "расхождение", errRow, errCells);
   if (best.errors !== null) {
     best.errors.forEach((e, i) => {
       if (e < 1e-9) errCells[i].classList.add("ok");
