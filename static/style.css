@@ -301,6 +301,33 @@ select.input option {
 
 .btn-primary:hover { background: #9ca3fa; border-color: #9ca3fa; }
 
+/* Control buttons: stop is red (destructive), keep-search is green
+   (it extends the successful run) — both tinted, solid on hover. */
+.btn-danger {
+  background: rgba(229, 86, 111, 0.08);
+  border-color: rgba(229, 86, 111, 0.55);
+  color: var(--negative);
+}
+
+.btn-danger:hover {
+  background: var(--negative);
+  border-color: var(--negative);
+  color: #1a0d10;
+}
+
+.btn-positive {
+  background: rgba(63, 192, 122, 0.1);
+  border-color: rgba(63, 192, 122, 0.55);
+  color: var(--positive);
+  font-weight: 600;
+}
+
+.btn-positive:hover {
+  background: var(--positive);
+  border-color: var(--positive);
+  color: #0f2018;
+}
+
 .icon { width: 15px; height: 15px; flex: none; }
 
 .run-controls {

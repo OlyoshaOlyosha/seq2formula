@@ -309,6 +309,11 @@ class RunManager:
     # -- the paced loop ------------------------------------------------------
 
     async def _loop(self) -> None:
+        # Pace by absolute deadlines: asyncio.sleep on Windows can wake
+        # early, so a relative "sleep the remainder" drifts fast and the
+        # run overshoots the slider (observed 46/s at 30). A step must
+        # not START before the previous period has fully elapsed.
+        next_gen: float | None = None
         try:
             while True:
                 wants_step = (self.status == "running"
@@ -316,7 +321,16 @@ class RunManager:
                 self.step_once = False
                 if wants_step and self.engine is not None:
                     loop = asyncio.get_event_loop()
-                    started = time.perf_counter()
+                    if next_gen is not None:
+                        behind = next_gen - time.perf_counter()
+                        if behind > 0:
+                            await asyncio.sleep(behind)
+                        elif -behind > self.delay * 3:
+                            next_gen = None  # resync after pause/continue
+                    if next_gen is None:
+                        next_gen = time.perf_counter() + self.delay
+                    else:
+                        next_gen += self.delay
                     result = await loop.run_in_executor(None, self.engine.step)
                     self.last_gen = result.payload()
                     await self.broadcast(self.last_gen)
@@ -325,9 +339,8 @@ class RunManager:
                     if self.engine.done and not self.continue_mode:
                         await self._finalize()
                         return
-                    await asyncio.sleep(max(0.0, self.delay
-                                            - (time.perf_counter() - started)))
                 else:
+                    next_gen = None
                     await asyncio.sleep(0.05)
         except asyncio.CancelledError:
             pass
