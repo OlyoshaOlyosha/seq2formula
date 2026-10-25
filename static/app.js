@@ -525,6 +525,12 @@ function renderRaceLog() {
 
 function updateRaceLog(msg) {
   state.lastGenNum = msg.gen;
+  if (msg.shock) {
+    pushLogEntry({
+      pre: "встряска: популяция застряла — подмешаны свежие формулы",
+      cls: "log-shock",
+    });
+  }
   if (msg.solved_now) {
     pushLogEntry({ pre: "точное совпадение найдено", cls: "log-solved" });
   } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
@@ -705,8 +711,8 @@ async function loadPuzzles() {
   own.textContent = "— своя последовательность —";
   select.appendChild(own);
   const tiers = { 1: "T1 · линейные", 2: "T2 · степени", 3: "T3 · смешанные",
-                  4: "T4 · новые операции" };
-  for (const tier of [1, 2, 3, 4]) {
+                  4: "T4 · новые операции", 5: "T5 · очень сложные" };
+  for (const tier of [1, 2, 3, 4, 5]) {
     const group = document.createElement("optgroup");
     group.label = tiers[tier];
     for (const p of PUZZLE_CACHE.filter((x) => x.tier === tier)) {

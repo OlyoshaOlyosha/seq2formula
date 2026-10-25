@@ -1,26 +1,641 @@
 {
   "puzzles": [
-    {"id": "t1-counting", "tier": 1, "name": "Счёт", "terms": [1, 2, 3, 4, 5, 6], "reference": "n"},
-    {"id": "t1-odd", "tier": 1, "name": "Нечётные", "terms": [1, 3, 5, 7, 9, 11], "reference": "2n - 1"},
-    {"id": "t1-shift-up", "tier": 1, "name": "Сдвиг вверх", "terms": [4, 5, 6, 7, 8, 9], "reference": "n + 3"},
-    {"id": "t1-triple-step", "tier": 1, "name": "Тройной шаг", "terms": [3, 6, 9, 12, 15, 18], "reference": "3n"},
-    {"id": "t1-decay", "tier": 1, "name": "Затухание", "terms": [8, 6, 4, 2, 0, -2], "reference": "10 - 2n"},
-    {"id": "t1-shifted-odd", "tier": 1, "name": "Нечётные с довеском", "terms": [3, 5, 7, 9, 11, 13], "reference": "2n + 1"},
-    {"id": "t2-powers-of-two", "tier": 2, "name": "Степень двойки", "terms": [2, 4, 8, 16, 32, 64], "reference": "2^n"},
-    {"id": "t2-squares", "tier": 2, "name": "Квадраты", "terms": [1, 4, 9, 16, 25, 36], "reference": "n^2"},
-    {"id": "t2-squares-plus-one", "tier": 2, "name": "Квадраты плюс один", "terms": [2, 5, 10, 17, 26, 37], "reference": "n^2 + 1"},
-    {"id": "t2-cubes", "tier": 2, "name": "Кубы", "terms": [1, 8, 27, 64, 125, 216], "reference": "n^3"},
-    {"id": "t2-powers-of-three", "tier": 2, "name": "Тройки в степени", "terms": [3, 9, 27, 81, 243, 729], "reference": "3^n"},
-    {"id": "t2-odd-squares", "tier": 2, "name": "Квадраты нечётных", "terms": [1, 9, 25, 49, 81, 121], "reference": "(2n - 1)^2"},
-    {"id": "t3-half-shift", "tier": 3, "name": "Полшага со сдвигом", "terms": [2, 2.5, 3, 3.5, 4, 4.5], "reference": "(n + 3) / 2"},
-    {"id": "t3-pronic", "tier": 3, "name": "Треугольные удвоенные", "terms": [0, 2, 6, 12, 20, 30], "reference": "n^2 - n"},
-    {"id": "t3-triangular", "tier": 3, "name": "Треугольные числа", "terms": [1, 3, 6, 10, 15, 21], "reference": "n(n + 1) / 2"},
-    {"id": "t3-half-square", "tier": 3, "name": "Половина квадрата", "terms": [0.5, 2, 4.5, 8, 12.5, 18], "reference": "n^2 / 2"},
-    {"id": "t3-cubes-plus-n", "tier": 3, "name": "Кубы с приправой", "terms": [2, 10, 30, 68, 130, 222], "reference": "n^3 + n"},
-    {"id": "t3-square-over-two", "tier": 3, "name": "Квадрат пополам с довеском", "terms": [1, 2.5, 5, 8.5, 13, 18.5], "reference": "(n^2 + 1) / 2"},
-    {"id": "t4-factorials", "tier": 4, "name": "Факториалы", "terms": [1, 2, 6, 24, 120, 720], "reference": "n!", "requires": ["fact"]},
-    {"id": "t4-wave", "tier": 4, "name": "Волна", "terms": [1, 0, -1, 0, 1, 0, -1, 0], "reference": "sin(π·n / 2)", "requires": ["sin", "pi"]},
-    {"id": "t4-cos-wave", "tier": 4, "name": "Мягкая волна", "terms": [0, -1, 0, 1, 0, -1, 0, 1], "reference": "cos(π·n / 2)", "requires": ["cos", "pi"]},
-    {"id": "t4-mod-cycle", "tier": 4, "name": "Цикл по тройке", "terms": [2, 5, 8, 2, 5, 8, 2, 5, 8], "reference": "((n + 2) mod 3)·3 + 2", "requires": ["mod"]}
+    {
+      "id": "t1-counting",
+      "tier": 1,
+      "name": "Счёт",
+      "terms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "reference": "n"
+    },
+    {
+      "id": "t1-odd",
+      "tier": 1,
+      "name": "Нечётные",
+      "terms": [
+        1,
+        3,
+        5,
+        7,
+        9,
+        11
+      ],
+      "reference": "2n - 1"
+    },
+    {
+      "id": "t1-shift-up",
+      "tier": 1,
+      "name": "Сдвиг вверх",
+      "terms": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "reference": "n + 3"
+    },
+    {
+      "id": "t1-triple-step",
+      "tier": 1,
+      "name": "Тройной шаг",
+      "terms": [
+        3,
+        6,
+        9,
+        12,
+        15,
+        18
+      ],
+      "reference": "3n"
+    },
+    {
+      "id": "t1-decay",
+      "tier": 1,
+      "name": "Затухание",
+      "terms": [
+        8,
+        6,
+        4,
+        2,
+        0,
+        -2
+      ],
+      "reference": "10 - 2n"
+    },
+    {
+      "id": "t1-shifted-odd",
+      "tier": 1,
+      "name": "Нечётные с довеском",
+      "terms": [
+        3,
+        5,
+        7,
+        9,
+        11,
+        13
+      ],
+      "reference": "2n + 1"
+    },
+    {
+      "id": "t1-backwards",
+      "tier": 1,
+      "name": "Обратный счёт",
+      "terms": [
+        6.0,
+        5.0,
+        4.0,
+        3.0,
+        2.0,
+        1.0
+      ],
+      "reference": "7 - n"
+    },
+    {
+      "id": "t2-powers-of-two",
+      "tier": 2,
+      "name": "Степень двойки",
+      "terms": [
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ],
+      "reference": "2^n"
+    },
+    {
+      "id": "t2-squares",
+      "tier": 2,
+      "name": "Квадраты",
+      "terms": [
+        1,
+        4,
+        9,
+        16,
+        25,
+        36
+      ],
+      "reference": "n^2"
+    },
+    {
+      "id": "t2-squares-plus-one",
+      "tier": 2,
+      "name": "Квадраты плюс один",
+      "terms": [
+        2,
+        5,
+        10,
+        17,
+        26,
+        37
+      ],
+      "reference": "n^2 + 1"
+    },
+    {
+      "id": "t2-cubes",
+      "tier": 2,
+      "name": "Кубы",
+      "terms": [
+        1,
+        8,
+        27,
+        64,
+        125,
+        216
+      ],
+      "reference": "n^3"
+    },
+    {
+      "id": "t2-powers-of-three",
+      "tier": 2,
+      "name": "Тройки в степени",
+      "terms": [
+        3,
+        9,
+        27,
+        81,
+        243,
+        729
+      ],
+      "reference": "3^n"
+    },
+    {
+      "id": "t2-odd-squares",
+      "tier": 2,
+      "name": "Квадраты нечётных",
+      "terms": [
+        1,
+        9,
+        25,
+        49,
+        81,
+        121
+      ],
+      "reference": "(2n - 1)^2"
+    },
+    {
+      "id": "t2-fourths",
+      "tier": 2,
+      "name": "Четвёртые степени двойки",
+      "terms": [
+        4.0,
+        16.0,
+        64.0,
+        256.0,
+        1024.0,
+        4096.0
+      ],
+      "reference": "4^n"
+    },
+    {
+      "id": "t2-squares-minus-one",
+      "tier": 2,
+      "name": "Квадраты без единицы",
+      "terms": [
+        0.0,
+        3.0,
+        8.0,
+        15.0,
+        24.0,
+        35.0
+      ],
+      "reference": "n^2 - 1"
+    },
+    {
+      "id": "t2-mersenne",
+      "tier": 2,
+      "name": "Мерсенн",
+      "terms": [
+        1.0,
+        3.0,
+        7.0,
+        15.0,
+        31.0,
+        63.0
+      ],
+      "reference": "2^n - 1"
+    },
+    {
+      "id": "t2-halving",
+      "tier": 2,
+      "name": "Половинки",
+      "terms": [
+        0.5,
+        0.25,
+        0.125,
+        0.0625,
+        0.03125,
+        0.015625
+      ],
+      "reference": "2^(-n)"
+    },
+    {
+      "id": "t3-half-shift",
+      "tier": 3,
+      "name": "Полшага со сдвигом",
+      "terms": [
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        4.5
+      ],
+      "reference": "(n + 3) / 2"
+    },
+    {
+      "id": "t3-pronic",
+      "tier": 3,
+      "name": "Треугольные удвоенные",
+      "terms": [
+        0,
+        2,
+        6,
+        12,
+        20,
+        30
+      ],
+      "reference": "n^2 - n"
+    },
+    {
+      "id": "t3-triangular",
+      "tier": 3,
+      "name": "Треугольные числа",
+      "terms": [
+        1,
+        3,
+        6,
+        10,
+        15,
+        21
+      ],
+      "reference": "n(n + 1) / 2"
+    },
+    {
+      "id": "t3-half-square",
+      "tier": 3,
+      "name": "Половина квадрата",
+      "terms": [
+        0.5,
+        2,
+        4.5,
+        8,
+        12.5,
+        18
+      ],
+      "reference": "n^2 / 2"
+    },
+    {
+      "id": "t3-cubes-plus-n",
+      "tier": 3,
+      "name": "Кубы с приправой",
+      "terms": [
+        2,
+        10,
+        30,
+        68,
+        130,
+        222
+      ],
+      "reference": "n^3 + n"
+    },
+    {
+      "id": "t3-square-over-two",
+      "tier": 3,
+      "name": "Квадрат пополам с довеском",
+      "terms": [
+        1,
+        2.5,
+        5,
+        8.5,
+        13,
+        18.5
+      ],
+      "reference": "(n^2 + 1) / 2"
+    },
+    {
+      "id": "t3-tetrahedral",
+      "tier": 3,
+      "name": "Тетраэдральные",
+      "terms": [
+        1.0,
+        4.0,
+        10.0,
+        20.0,
+        35.0,
+        56.0
+      ],
+      "reference": "n(n+1)(n+2)/6"
+    },
+    {
+      "id": "t3-cubes-minus-one",
+      "tier": 3,
+      "name": "Кубы без единицы",
+      "terms": [
+        0.0,
+        7.0,
+        26.0,
+        63.0,
+        124.0,
+        215.0
+      ],
+      "reference": "n^3 - 1"
+    },
+    {
+      "id": "t3-plus-reciprocal",
+      "tier": 3,
+      "name": "Единица плюс доля",
+      "terms": [
+        2.0,
+        1.5,
+        1.333333333333333,
+        1.25,
+        1.2,
+        1.166666666666667
+      ],
+      "reference": "(n + 1) / n"
+    },
+    {
+      "id": "t4-factorials",
+      "tier": 4,
+      "name": "Факториалы",
+      "terms": [
+        1,
+        2,
+        6,
+        24,
+        120,
+        720
+      ],
+      "reference": "n!",
+      "requires": [
+        "fact"
+      ]
+    },
+    {
+      "id": "t4-wave",
+      "tier": 4,
+      "name": "Волна",
+      "terms": [
+        1,
+        0,
+        -1,
+        0,
+        1,
+        0,
+        -1,
+        0
+      ],
+      "reference": "sin(π·n / 2)",
+      "requires": [
+        "sin",
+        "pi"
+      ]
+    },
+    {
+      "id": "t4-cos-wave",
+      "tier": 4,
+      "name": "Мягкая волна",
+      "terms": [
+        0,
+        -1,
+        0,
+        1,
+        0,
+        -1,
+        0,
+        1
+      ],
+      "reference": "cos(π·n / 2)",
+      "requires": [
+        "cos",
+        "pi"
+      ]
+    },
+    {
+      "id": "t4-mod-cycle",
+      "tier": 4,
+      "name": "Цикл по тройке",
+      "terms": [
+        2,
+        5,
+        8,
+        2,
+        5,
+        8,
+        2,
+        5,
+        8
+      ],
+      "reference": "((n + 2) mod 3)·3 + 2",
+      "requires": [
+        "mod"
+      ]
+    },
+    {
+      "id": "t4-sqrt-n",
+      "tier": 4,
+      "name": "Корни",
+      "terms": [
+        1.0,
+        1.414213562373095,
+        1.732050807568877,
+        2.0,
+        2.23606797749979,
+        2.449489742783178,
+        2.645751311064591,
+        2.82842712474619
+      ],
+      "reference": "sqrt(n)",
+      "requires": [
+        "sqrt"
+      ]
+    },
+    {
+      "id": "t4-cbrt-n",
+      "tier": 4,
+      "name": "Кубические корни",
+      "terms": [
+        1.0,
+        1.259921049894873,
+        1.442249570307408,
+        1.587401051968199,
+        1.709975946676697,
+        1.81712059283214,
+        1.912931182772389,
+        2.0
+      ],
+      "reference": "cbrt(n)",
+      "requires": [
+        "cbrt"
+      ]
+    },
+    {
+      "id": "t4-ln-n",
+      "tier": 4,
+      "name": "Натуральный логарифм",
+      "terms": [
+        0.0,
+        0.693147180559945,
+        1.09861228866811,
+        1.386294361119891,
+        1.6094379124341,
+        1.791759469228055,
+        1.945910149055313,
+        2.079441541679836
+      ],
+      "reference": "ln(n)",
+      "requires": [
+        "ln"
+      ]
+    },
+    {
+      "id": "t4-abs-dip",
+      "tier": 4,
+      "name": "Долина",
+      "terms": [
+        3.0,
+        2.0,
+        1.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0
+      ],
+      "reference": "abs(n - 4)",
+      "requires": [
+        "abs"
+      ]
+    },
+    {
+      "id": "t4-fact-plus-n",
+      "tier": 4,
+      "name": "Факториалы с приправой",
+      "terms": [
+        2.0,
+        4.0,
+        9.0,
+        28.0,
+        125.0,
+        726.0,
+        5047.0,
+        40328.0
+      ],
+      "reference": "n! + n",
+      "requires": [
+        "fact"
+      ]
+    },
+    {
+      "id": "t4-e-powers",
+      "tier": 4,
+      "name": "Степени e",
+      "terms": [
+        1.0,
+        2.718281828459045,
+        7.38905609893065,
+        20.085536923187664,
+        54.59815003314423,
+        148.41315910257657,
+        403.428793492735,
+        1096.6331584284583
+      ],
+      "reference": "e^(n - 1)",
+      "requires": [
+        "e"
+      ]
+    },
+    {
+      "id": "t5-fifth-powers",
+      "tier": 5,
+      "name": "Пятые степени",
+      "terms": [
+        1.0,
+        32.0,
+        243.0,
+        1024.0,
+        3125.0,
+        7776.0
+      ],
+      "reference": "n^5"
+    },
+    {
+      "id": "t5-pyramidal",
+      "tier": 5,
+      "name": "Квадратные пирамидальные",
+      "terms": [
+        1.0,
+        5.0,
+        14.0,
+        30.0,
+        55.0,
+        91.0
+      ],
+      "reference": "n(n+1)(2n+1)/6"
+    },
+    {
+      "id": "t5-power-plus-n",
+      "tier": 5,
+      "name": "Степень с приправой",
+      "terms": [
+        3.0,
+        6.0,
+        11.0,
+        20.0,
+        37.0,
+        70.0
+      ],
+      "reference": "2^n + n"
+    },
+    {
+      "id": "t5-pendulum",
+      "tier": 5,
+      "name": "Маятник",
+      "terms": [
+        -1.0,
+        1.0,
+        -1.0,
+        1.0,
+        -1.0,
+        1.0,
+        -1.0,
+        1.0
+      ],
+      "reference": "1 - 2(n mod 2)",
+      "requires": [
+        "mod"
+      ]
+    },
+    {
+      "id": "t5-wave-squared",
+      "tier": 5,
+      "name": "Волна в квадрате",
+      "terms": [
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "reference": "sin(π·n / 2)^2",
+      "requires": [
+        "sin",
+        "pi",
+        "^"
+      ]
+    }
   ]
 }

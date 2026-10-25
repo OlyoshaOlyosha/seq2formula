@@ -613,6 +613,8 @@ input[type="range"] {
 
 .race-log-item.log-shrink { color: var(--teal); }
 
+.race-log-item.log-shock { color: var(--amber); }
+
 /* uPlot theming */
 .uplot, .uplot *, .uplot *::before, .uplot *::after { box-sizing: border-box; }
 .uplot .title, .uplot .caption { display: none; }

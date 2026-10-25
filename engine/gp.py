@@ -23,6 +23,7 @@ from .grammar import (
     crossover,
     initial_population,
     point_mutation,
+    random_tree,
     shrink_mutation,
     subtree_mutation,
 )
@@ -43,6 +44,14 @@ SHRINK_PARSIMONY = 0.02
 
 # Size histogram bins: 1..19 exact sizes, 20+ lumped together.
 SIZE_HIST_BINS = 20
+
+# Anti-stagnation ("shock"): when the best fitness has not improved for
+# this many generations (and the run is not solved yet), a share of the
+# population is replaced with fresh random trees — the usual GP failure
+# is a degenerate population grinding smaller-and-smaller wrong formulas.
+# 0 disables the mechanism entirely.
+STAGNATION_WINDOW = 60
+SHOCK_FRACTION = 0.25
 
 
 @dataclass
@@ -67,6 +76,9 @@ class GPConfig:
     # shrink-phase knobs, exposed to the settings tab
     shrink_generations: int = SHRINK_GENERATIONS
     shrink_parsimony: float = SHRINK_PARSIMONY
+    # anti-stagnation: generations without a new best before a shock
+    stagnation_window: int = STAGNATION_WINDOW   # 0 = off
+    shock_fraction: float = SHOCK_FRACTION
 
 
 @dataclass
@@ -96,6 +108,7 @@ class GenerationResult:
     new_best: bool          # fitness improved over the whole run
     solved_now: bool        # first exact hit in this generation
     solved: bool            # run has an exact formula (any past gen)
+    shock: bool             # stagnation shock fired this generation
     top: list[dict] = field(default_factory=list)  # leaderboard, best first
     stats: dict = field(default_factory=dict)
     elapsed_ms: float = 0.0
@@ -111,6 +124,7 @@ class GenerationResult:
             "new_best": self.new_best,
             "solved_now": self.solved_now,
             "solved": self.solved,
+            "shock": self.shock,
             "stats": self.stats,
             "elapsed_ms": round(self.elapsed_ms, 2),
         }
@@ -144,6 +158,9 @@ class GPEngine:
         self.solved = False
         self.solved_gen: int | None = None
         self._exact_pool: list[tuple[Node, Score]] = []
+        self.stagnation = 0   # generations since the last new best
+        self.shocks = 0       # shocks fired over the whole run
+        self._shock_now = False
         self.curiosities: dict[tuple, dict] = {}
 
     # -- one generation -------------------------------------------------
@@ -184,6 +201,15 @@ class GPEngine:
                     or best_score.fitness > self.best_ever.score.fitness + 1e-12)
         if new_best:
             self.best_ever = Best(best_node, best_score)
+        # Anti-stagnation: no new best for `stagnation_window` generations
+        # while unsolved -> shock the population (fresh blood in _breed).
+        self.stagnation = 0 if new_best else self.stagnation + 1
+        self._shock_now = (
+            not self.solved and self.cfg.stagnation_window > 0
+            and self.stagnation >= self.cfg.stagnation_window)
+        if self._shock_now:
+            self.stagnation = 0
+            self.shocks += 1
 
         solved_now = best_score.exact and not self.solved
         if best_score.exact and not self.solved:
@@ -213,6 +239,7 @@ class GPEngine:
             new_best=new_best,
             solved_now=solved_now,
             solved=self.solved,
+            shock=self._shock_now,
             top=top,
             stats=stats,
             elapsed_ms=(time.perf_counter() - started) * 1000.0,
@@ -237,6 +264,13 @@ class GPEngine:
             elite = [node for node, _ in scored[:cfg.elitism]]
         offspring: list[Node] = []
         while len(elite) + len(offspring) < cfg.population:
+            if self._shock_now and self.rng.random() < cfg.shock_fraction:
+                # Stagnation shock: fresh random trees instead of more of
+                # the same bloodline; elites above are untouched.
+                offspring.append(random_tree(
+                    self.rng, cfg.max_depth, "grow", self.ops, self.funcs,
+                    self.specials))
+                continue
             a = self._tournament(scored)
             if self.rng.random() < cfg.p_crossover:
                 child = crossover(self.rng, a, self._tournament(scored),
