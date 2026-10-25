@@ -158,6 +158,7 @@ class RunManager:
         self.terms: list[float] = []
         self.last_gen: dict | None = None
         self.finish_reason: str | None = None
+        self.config_summary: dict = {}
         self.continue_mode = False
         self.clients: set[WebSocket] = set()
 
@@ -212,6 +213,16 @@ class RunManager:
         self.terms = terms
         self.last_gen = None
         self.finish_reason = None
+        # remembered so the history entry can show how the run was tuned
+        self.config_summary = {
+            "population": config.population,
+            "parsimony": config.parsimony,
+            "p_mutate": config.p_mutate,
+            "p_crossover": config.p_crossover,
+            "tournament": config.tournament,
+            "elitism": config.elitism,
+            "speed": request.speed,
+        }
         self.task = asyncio.get_running_loop().create_task(self._loop())
         return self.snapshot()
 
@@ -365,6 +376,7 @@ class RunManager:
                 "generations": self.engine.solved_gen + 1,
                 "time_s": round(self.solved_wall_time or
                                 (time.perf_counter() - self.started_at), 3),
+                "settings": self.config_summary,
                 "solved": True,
             }
             history = _load_json(HISTORY_FILE, [])
@@ -458,10 +470,15 @@ def get_stats() -> dict:
             "record": (min(tier_best, key=lambda e: e["generations"])
                        if tier_best else None),
         })
-    records = sorted(best.values(), key=lambda e: e["generations"])[:5]
+    records = sorted((e for e in best.values() if e.get("puzzle")),
+                     key=lambda e: e["generations"])[:5]
     clean = [{k: e[k] for k in ("puzzle", "sequence", "formula",
                                 "generations", "time_s", "size")}
              for e in records]
+    for r, e in zip(clean, records):
+        # how many solved attempts this sequence has in the history
+        r["attempts"] = sum(1 for h in history
+                            if h.get("solved") and h["seq_key"] == e["seq_key"])
     return {"total": len(puzzles), "solved": len(best), "by_tier": by_tier,
             "records": clean}
 

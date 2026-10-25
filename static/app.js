@@ -793,8 +793,15 @@ async function loadHistory() {
   }
   for (const h of data.history) {
     const tr = document.createElement("tr");
+    if (h.settings) {
+      const s = h.settings;
+      tr.title = `настройки прогона: популяция ${s.population}, `
+        + `мутация ${s.p_mutate}, кроссовер ${s.p_crossover}, `
+        + `штраф ${s.parsimony}, элита ${s.elitism}, `
+        + `турнир ${s.tournament}, скорость ${s.speed}`;
+    }
     addCell(tr, "td", fmtWhen(h.ts), "when");
-    addCell(tr, "td", h.sequence.map(fmtNum).join(" "), "seq");
+    addCell(tr, "td", h.puzzle ? `«${h.puzzle}» ${h.sequence.map(fmtNum).join(" ")}` : h.sequence.map(fmtNum).join(" "), "seq");
     const f = addCell(tr, "td", "");
     if (h.formula_ast) renderKatex(f, astToLatex(h.formula_ast), false);
     else f.textContent = h.formula;
@@ -905,7 +912,9 @@ async function loadStats() {
     const row = document.createElement("div");
     row.className = "stats-record";
     const who = document.createElement("span");
-    who.textContent = r.puzzle || "своя последовательность";
+    who.textContent = r.attempts > 1
+      ? `${r.puzzle} · ${r.attempts} попыток`
+      : r.puzzle;
     const val = document.createElement("span");
     val.className = "num";
     val.textContent = `${r.generations} пок. · ${fmtTime(r.time_s)}`;
