@@ -138,7 +138,7 @@ class SettingsRequest(BaseModel):
 
 
 class ControlRequest(BaseModel):
-    action: str = Field(pattern="^(pause|resume|step|stop)$")
+    action: str = Field(pattern="^(pause|resume|step|stop|continue)$")
 
 
 class SpeedRequest(BaseModel):
@@ -158,6 +158,7 @@ class RunManager:
         self.terms: list[float] = []
         self.last_gen: dict | None = None
         self.finish_reason: str | None = None
+        self.continue_mode = False
         self.clients: set[WebSocket] = set()
 
     # -- websocket plumbing ------------------------------------------------
@@ -204,6 +205,7 @@ class RunManager:
         self.status = "running"
         self.delay = 1.0 / request.speed
         self.step_once = False
+        self.continue_mode = False
         self.started_at = time.perf_counter()
         self.solved_wall_time = None
         self.puzzle = puzzle
@@ -257,6 +259,16 @@ class RunManager:
             self.status = "paused"
         elif action == "resume" and self.status in ("paused", "running"):
             self.status = "running"
+        elif action == "continue":
+            # Keep exploring after the run finished: more exact variants
+            # (or even shorter ones) may still turn up. Runs until Стоп.
+            if self.status != "finished" or not self.engine.solved:
+                raise HTTPException(409, "continue needs a finished solved run")
+            self.continue_mode = True
+            self.status = "running"
+            # the paced loop returned when the run finalized — start a new one
+            if self.task is None or self.task.done():
+                self.task = asyncio.get_running_loop().create_task(self._loop())
         elif action == "step":
             if self.status == "finished":
                 raise HTTPException(409, "run already finished")
@@ -310,7 +322,7 @@ class RunManager:
                     await self.broadcast(self.last_gen)
                     if result.solved_now:
                         self.solved_wall_time = time.perf_counter() - self.started_at
-                    if self.engine.done:
+                    if self.engine.done and not self.continue_mode:
                         await self._finalize()
                         return
                     await asyncio.sleep(max(0.0, self.delay

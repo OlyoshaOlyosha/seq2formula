@@ -20,6 +20,7 @@ const state = {
   lastGenNum: null,
   lastExactSize: Infinity,
   lastLoggedBest: null,
+  lastRunSolved: false,
   ops: new Set(["+", "-", "*", "/", "^"]),  // enabled binary operators
   settings: null,          // engine knobs from /api/settings (Настройки tab)
   settingDefaults: null,
@@ -318,6 +319,8 @@ function setStatus(status) {
   stepBtn.disabled = status === "running" || status === "finished";
   stopBtn.disabled = status !== "running" && status !== "paused";
   startBtn.disabled = status === "running" || status === "paused";
+  // continue is offered only for a finished run that found an answer
+  $("continueBtn").hidden = !(status === "finished" && state.lastRunSolved);
   // operator chips apply to the next run — locked while one is live
   document.querySelectorAll(".op-chip").forEach((chip) => {
     chip.disabled = status === "running" || status === "paused";
@@ -607,6 +610,7 @@ function buildTermsRow(row, label, cells, collect) {
 }
 
 function applySolved(msg) {
+  state.lastRunSolved = true;
   setStatus("finished");
   setChip("решено", "solved");
   $("resultsDot").hidden = false;
@@ -643,6 +647,7 @@ function applySolved(msg) {
 
 function applyStatusMsg(msg) {
   setStatus(msg.status);
+  if ("solved" in msg) state.lastRunSolved = msg.solved === true;
   if (msg.sequence && msg.sequence.length) {
     state.puzzleTerms = msg.sequence;
   }
@@ -705,7 +710,8 @@ async function loadPuzzles() {
   const data = await api("/api/puzzles");
   PUZZLE_CACHE = data.puzzles;
   const select = $("puzzleSelect");
-  select.innerHTML = "";
+  const keep = select.value;  // refreshAll() rebuilds the list after every
+  select.innerHTML = "";      // solve — the selection must survive it
   const own = document.createElement("option");
   own.value = "";
   own.textContent = "— своя последовательность —";
@@ -723,6 +729,7 @@ async function loadPuzzles() {
     }
     select.appendChild(group);
   }
+  select.value = keep;
   updateOpsHint();
 }
 
@@ -921,6 +928,7 @@ function parseTerms(text) {
 async function startRun(event) {
   event.preventDefault();
   $("solvedNote").classList.remove("show");
+  state.lastRunSolved = false;
   const puzzleId = $("puzzleSelect").value || null;
   let body;
   if (puzzleId) {
@@ -1076,6 +1084,7 @@ function bindControls() {
   });
   $("stepBtn").addEventListener("click", () => control("step"));
   $("stopBtn").addEventListener("click", () => control("stop"));
+  $("continueBtn").addEventListener("click", () => control("continue"));
   let speedTimer = null;
   $("speedRange").addEventListener("input", (e) => {
     $("speedValue").textContent = e.target.value + " поколений/с";

@@ -213,8 +213,13 @@ class GPEngine:
             self.stagnation = 0
             self.shocks += 1
 
-        solved_now = best_score.exact and not self.solved
-        if best_score.exact and not self.solved:
+        # Solve detection scans the WHOLE population, not just the fitness
+        # leader: a big-but-exact formula can legitimately lose on fitness
+        # to a shorter near-miss (1 - error - parsimony*size), and it must
+        # still trigger the solve + shrink phase. Same scan as the hall of
+        # fame below.
+        solved_now = (not self.solved) and any(sc.exact for _, sc in scored)
+        if solved_now:
             self.solved = True
             self.solved_gen = self.generation
         # Scan the whole population: a size-3 gem can sit mid-table while
