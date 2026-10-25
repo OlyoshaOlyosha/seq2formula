@@ -18,9 +18,13 @@ showing, no network access is used or required.
 ## How it works
 
 - Candidate formulas are expression trees over a small grammar: `n`,
-  numeric constants, `+ - * /`, `^`.
-- You choose which operators the search may use — turn any of them off
-  and watch how (or whether) the evolution finds another route.
+  numeric constants (plus π and e), `+ - * / ^ %` (remainder), unary
+  minus, and functions — `sqrt`, cube root, factorial, `abs`, `sin`,
+  `cos`, `tan`, `ln`.
+- You choose which operators and functions the search may use — turn any
+  of them off and watch how (or whether) the evolution finds another
+  route. Basic operators are on by default; the advanced set is one click
+  away.
 - Fitness combines **accuracy** (a candidate is evaluated on n = 1..N; the
   closer the values to the target sequence, the better) with **parsimony**
   (shorter formulas win ties, which keeps solutions readable and prevents
@@ -60,12 +64,17 @@ Experimental, in continuous development.
 - Stage 1 (done) — genetic programming engine with a post-solution
   "shrink" phase, live dashboard, operator picker, built-in puzzle
   library of graded difficulty.
+- Grammar v2 (done) — unary functions (roots, factorial, trigonometry,
+  logarithm), the remainder operator, and the π / e constants, with the
+  picker regrouped into basic and advanced sets; puzzle tier T4 showcases
+  the new operations.
 - Stage 2 (next) — reinforcement-learning engine that assembles formulas
   step by step and is trained live, per puzzle; trained policies are
   saved, reused and compared.
-- Later — grammar growth (π, `sqrt`, trigonometry, factorial, fractions,
-  recurrences; the operator picker will cover the new operations too),
-  more statistics, experiments with engine parameters.
+- Later — formula plots (see what a formula looks like next to its
+  sequence), a settings tab for the engine knobs, recurrences (the
+  operator picker will cover the new operations too), more statistics,
+  experiments with engine parameters.
 
 ## Notes
 

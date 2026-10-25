@@ -6,7 +6,7 @@
 <title>seq2formula — поиск формулы</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=6">
+<link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
 <header class="topbar">
@@ -43,7 +43,7 @@
           <select id="puzzleSelect" class="input" aria-label="Загадка из библиотеки">
             <option value="">— своя последовательность —</option>
           </select>
-          <span class="field-hint">18 загадок трёх уровней сложности</span>
+          <span class="field-hint">22 загадки, четыре уровня сложности</span>
         </label>
       </form>
       <div class="run-controls" id="runControls">
@@ -75,13 +75,35 @@
         <span class="ops-label">Операции формул
           <span class="ops-hint">включай и выключай — применяются к следующему запуску</span>
         </span>
-        <div class="op-chips">
-          <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
-          <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
-          <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="умножение">×</button>
-          <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="деление">÷</button>
-          <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="возведение в степень">xʸ</button>
+        <div class="ops-groups">
+          <div class="ops-group">
+            <span class="ops-group-name">Базовые</span>
+            <div class="op-chips">
+              <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
+              <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
+              <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="умножение">×</button>
+              <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="деление">÷</button>
+              <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="возведение в степень">xʸ</button>
+            </div>
+          </div>
+          <div class="ops-group">
+            <span class="ops-group-name">Расширенные</span>
+            <div class="op-chips">
+              <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="квадратный корень">√</button>
+              <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="кубический корень">∛</button>
+              <button type="button" class="op-chip" data-op="fact" aria-pressed="false" title="факториал">!</button>
+              <button type="button" class="op-chip" data-op="abs" aria-pressed="false" title="модуль числа">|x|</button>
+              <button type="button" class="op-chip" data-op="mod" aria-pressed="false" title="остаток от деления (mod)">%</button>
+              <button type="button" class="op-chip" data-op="sin" aria-pressed="false" title="синус">sin</button>
+              <button type="button" class="op-chip" data-op="cos" aria-pressed="false" title="косинус">cos</button>
+              <button type="button" class="op-chip" data-op="tan" aria-pressed="false" title="тангенс">tan</button>
+              <button type="button" class="op-chip" data-op="ln" aria-pressed="false" title="натуральный логарифм">ln</button>
+              <button type="button" class="op-chip" data-op="pi" aria-pressed="false" title="число π">π</button>
+              <button type="button" class="op-chip" data-op="e" aria-pressed="false" title="число e">e</button>
+            </div>
+          </div>
           <span class="field-hint" id="opsWarn" hidden>нужна хотя бы одна операция</span>
+          <span class="field-hint ops-req" id="opsReq" hidden></span>
         </div>
       </div>
     </section>
@@ -195,6 +217,6 @@
 
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>

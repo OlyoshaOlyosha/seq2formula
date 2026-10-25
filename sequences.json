@@ -17,6 +17,10 @@
     {"id": "t3-triangular", "tier": 3, "name": "Треугольные числа", "terms": [1, 3, 6, 10, 15, 21], "reference": "n(n + 1) / 2"},
     {"id": "t3-half-square", "tier": 3, "name": "Половина квадрата", "terms": [0.5, 2, 4.5, 8, 12.5, 18], "reference": "n^2 / 2"},
     {"id": "t3-cubes-plus-n", "tier": 3, "name": "Кубы с приправой", "terms": [2, 10, 30, 68, 130, 222], "reference": "n^3 + n"},
-    {"id": "t3-square-over-two", "tier": 3, "name": "Квадрат пополам с довеском", "terms": [1, 2.5, 5, 8.5, 13, 18.5], "reference": "(n^2 + 1) / 2"}
+    {"id": "t3-square-over-two", "tier": 3, "name": "Квадрат пополам с довеском", "terms": [1, 2.5, 5, 8.5, 13, 18.5], "reference": "(n^2 + 1) / 2"},
+    {"id": "t4-factorials", "tier": 4, "name": "Факториалы", "terms": [1, 2, 6, 24, 120, 720], "reference": "n!", "requires": ["fact"]},
+    {"id": "t4-wave", "tier": 4, "name": "Волна", "terms": [1, 0, -1, 0, 1, 0, -1, 0], "reference": "sin(π·n / 2)", "requires": ["sin", "pi"]},
+    {"id": "t4-cos-wave", "tier": 4, "name": "Мягкая волна", "terms": [0, -1, 0, 1, 0, -1, 0, 1], "reference": "cos(π·n / 2)", "requires": ["cos", "pi"]},
+    {"id": "t4-mod-cycle", "tier": 4, "name": "Цикл по тройке", "terms": [2, 5, 8, 2, 5, 8, 2, 5, 8], "reference": "((n + 2) mod 3)·3 + 2", "requires": ["mod"]}
   ]
 }

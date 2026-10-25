@@ -22,9 +22,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from engine import GPConfig, GPEngine, from_dict, to_dict, to_text
+from engine import GPConfig, GPEngine, UNARY_FUNCS, from_dict, to_dict, to_text
 from engine.grammar import BINARY_OPS
 from engine.gp import SHRINK_GENERATIONS
+from engine.nodes import special_value
+
+# Grammar feature tokens the dashboard may send in RunRequest.ops: binary
+# operators, unary functions and special constants, one flat list — the
+# grouping into picker sections is purely a UI concern.
+CONST_TOKENS = ("pi", "e")
+ALL_TOKENS = frozenset(BINARY_OPS) | frozenset(UNARY_FUNCS) | frozenset(CONST_TOKENS)
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -95,7 +102,7 @@ class RunRequest(BaseModel):
     parsimony: float = Field(default=0.003, ge=0.0, le=0.1)
     max_generations: int = Field(default=1000, ge=10, le=5000)
     speed: float = Field(default=DEFAULT_GPS, ge=0.5, le=60)
-    ops: list[str] | None = None  # subset of + - * / ^; None/omitted = all
+    ops: list[str] | None = None  # feature tokens (ops/funcs/consts); None = all
 
 
 class ControlRequest(BaseModel):
@@ -139,12 +146,15 @@ class RunManager:
     def start(self, request: RunRequest) -> dict:
         terms, puzzle = self._resolve_terms(request)
         self.stop(reason="replaced", notify=False)
-        allowed = self._validate_ops(request.ops)
+        allowed_ops, allowed_funcs, allowed_consts = \
+            self._validate_grammar(request.ops)
         config = GPConfig(
             population=request.population,
             parsimony=request.parsimony,
             max_generations=request.max_generations,
-            allowed_ops=allowed,
+            allowed_ops=allowed_ops,
+            allowed_funcs=allowed_funcs,
+            allowed_consts=allowed_consts,
         )
         self.engine = GPEngine(terms, config)
         self.status = "running"
@@ -160,16 +170,26 @@ class RunManager:
         return self.snapshot()
 
     @staticmethod
-    def _validate_ops(ops: list[str] | None) -> tuple[str, ...] | None:
-        """Operator subset for the run; None means the full set."""
+    def _validate_grammar(
+            ops: list[str] | None,
+    ) -> tuple[tuple[str, ...] | None, tuple[str, ...] | None,
+               tuple[str, ...] | None]:
+        """Split the flat feature-token list into (binary ops, unary
+        funcs, special consts); None members mean "the full set"."""
         if ops is None:
-            return None
+            return None, None, None
         if not ops:
-            raise HTTPException(422, "at least one operator must be enabled")
-        bad = [op for op in ops if op not in BINARY_OPS]
+            raise HTTPException(422, "at least one feature must be enabled")
+        bad = [token for token in ops if token not in ALL_TOKENS]
         if bad:
-            raise HTTPException(422, f"unknown operators: {bad}")
-        return tuple(dict.fromkeys(ops))  # dedupe, keep order
+            raise HTTPException(422, f"unknown grammar tokens: {bad}")
+        ordered = tuple(dict.fromkeys(ops))  # dedupe, keep order
+        bin_ops = tuple(t for t in ordered if t in BINARY_OPS) or None
+        funcs = tuple(t for t in ordered if t in UNARY_FUNCS) or ()
+        consts = tuple(t for t in ordered if t in CONST_TOKENS) or ()
+        if bin_ops is None:
+            raise HTTPException(422, "at least one operator must be enabled")
+        return bin_ops, funcs, consts
 
     def _resolve_terms(self, request: RunRequest) -> tuple[list[float], dict | None]:
         if request.puzzle_id is not None:

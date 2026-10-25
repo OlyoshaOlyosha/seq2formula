@@ -21,7 +21,7 @@ from .fitness import Score, INVALID_FITNESS, score_candidate
 from .grammar import (BINARY_OPS, MAX_INIT_DEPTH, crossover,
                       initial_population, point_mutation, shrink_mutation,
                       subtree_mutation)
-from .nodes import Node, size, to_dict, to_text
+from .nodes import Node, UNARY_FUNCS, special_value, size, to_dict, to_text
 
 # Curiosity gallery: "almost correct" (mean error below) but comically
 # overbuilt (size at least) formulas, deduped by the values they produce.
@@ -54,7 +54,11 @@ class GPConfig:
     parsimony: float = 0.003
     max_generations: int = 1000
     seed: int | None = None
-    allowed_ops: tuple[str, ...] | None = None  # None = all BINARY_OPS
+    allowed_ops: tuple[str, ...] | None = None    # None = all BINARY_OPS
+    # v2 features default OFF so a plain GPConfig() searches exactly the
+    # v1 space (tuned convergence); None explicitly means "all of them".
+    allowed_funcs: tuple[str, ...] | None = ()
+    allowed_consts: tuple[str, ...] | None = ()
 
 
 @dataclass
@@ -109,11 +113,24 @@ class GPEngine:
         self.seq = [float(x) for x in seq]
         self.cfg = config or GPConfig()
         self.ops: tuple[str, ...] = (tuple(self.cfg.allowed_ops)
-                                     if self.cfg.allowed_ops else BINARY_OPS)
+                                     if self.cfg.allowed_ops is not None
+                                     else BINARY_OPS)
+        # () (explicitly empty) means "functions disabled" — only None
+        # means "all of them"; an `if not` check would confuse the two.
+        self.funcs: tuple[str, ...] = (tuple(self.cfg.allowed_funcs)
+                                       if self.cfg.allowed_funcs is not None
+                                       else UNARY_FUNCS)
+        self.specials: tuple[float, ...] = tuple(
+            v for v in (special_value(token)
+                        for token in (self.cfg.allowed_consts
+                                      if self.cfg.allowed_consts is not None
+                                      else ("pi", "e")))
+            if v is not None)
         self.rng = random.Random(self.cfg.seed)
         self.generation = 0
         self.population: list[Node] = initial_population(
-            self.rng, self.cfg.population, self.cfg.max_depth, self.ops)
+            self.rng, self.cfg.population, self.cfg.max_depth, self.ops,
+            self.funcs, self.specials)
         self.best_ever: Best | None = None
         self.shortest_exact: Best | None = None
         self.solved = False
@@ -212,20 +229,24 @@ class GPEngine:
             a = self._tournament(scored)
             if self.rng.random() < cfg.p_crossover:
                 child = crossover(self.rng, a, self._tournament(scored),
-                                  cfg.max_depth, self.ops)
+                                  cfg.max_depth, self.ops, self.funcs,
+                                  self.specials)
             else:
                 child = a
             if self.solved:
                 # Shrink phase: hunt shorter exact forms on purpose.
                 if self.rng.random() < 0.4:
-                    child = shrink_mutation(self.rng, child)
+                    child = shrink_mutation(self.rng, child, self.specials)
                 if self.rng.random() < cfg.p_mutate:
-                    child = subtree_mutation(self.rng, child, cfg.max_depth, self.ops)
+                    child = subtree_mutation(self.rng, child, cfg.max_depth,
+                                             self.ops, self.funcs, self.specials)
             else:
                 if self.rng.random() < cfg.p_mutate:
-                    child = subtree_mutation(self.rng, child, cfg.max_depth, self.ops)
+                    child = subtree_mutation(self.rng, child, cfg.max_depth,
+                                             self.ops, self.funcs, self.specials)
                 if self.rng.random() < 0.05:
-                    child = point_mutation(self.rng, child, self.ops)
+                    child = point_mutation(self.rng, child, self.ops,
+                                           self.funcs, self.specials)
             offspring.append(child)
         return elite + offspring
 

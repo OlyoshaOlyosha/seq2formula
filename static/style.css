@@ -339,6 +339,32 @@ select.input option {
 
 .ops-hint { color: var(--faint); font-size: var(--fs-small); font-weight: 400; }
 
+.ops-groups {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ops-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ops-group-name {
+  font-size: var(--fs-small);
+  color: var(--faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex: none;
+}
+
+.ops-req { color: var(--amber); max-width: 460px; }
+
 .op-chips {
   display: flex;
   align-items: center;

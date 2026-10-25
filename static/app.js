@@ -75,6 +75,9 @@ function negativeConst(ast) {
 
 function astToLatex(ast) {
   if (ast.t === "c") {
+    // special constants survive the JSON round-trip as exact doubles
+    if (Math.abs(ast.v - Math.PI) < 1e-12) return "\\pi";
+    if (Math.abs(ast.v - Math.E) < 1e-12) return "e";
     const s = numText(ast.v);
     return ast.v < 0 ? `\\left(${s}\\right)` : s;
   }
@@ -82,6 +85,25 @@ function astToLatex(ast) {
   if (ast.t === "~") {
     const inner = astToLatex(ast.x);
     return "-" + (isSimple(inner) ? inner : `\\left(${inner}\\right)`);
+  }
+  if (ast.t === "f") {
+    const inner = astToLatex(ast.x);
+    switch (ast.n) {
+      case "sqrt": return `\\sqrt{${inner}}`;
+      case "cbrt": return `\\sqrt[3]{${inner}}`;
+      case "abs": return `\\left|${inner}\\right|`;
+      case "fact": {
+        // postfix ! binds tightest: parens unless the argument is a bare
+        // variable, a non-negative constant, or an already-parenthesized
+        // function call (n!! would read ambiguously)
+        const bare = ast.x.t === "n"
+          || (ast.x.t === "c" && ast.x.v >= 0)
+          || (ast.x.t === "f" && ast.x.n !== "fact");
+        return `${bare ? inner : `\\left(${inner}\\right)`}!`;
+      }
+      default:
+        return `\\operatorname{${ast.n}}\\left(${inner}\\right)`;
+    }
   }
   // binary op: fold a negative constant into the sign (n + -3 -> n - 3)
   const neg = ast.t === "+" || ast.t === "-" ? negativeConst(ast.r) : null;
@@ -103,6 +125,8 @@ function astToLatex(ast) {
       return `${L} \\cdot ${R}`;
     case "/":
       return `\\frac{${L}}{${R}}`;
+    case "mod":
+      return `${L} \\bmod ${R}`;
     case "^":
       return `${isSimple(L) ? L : `\\left(${L}\\right)`}^{${R}}`;
   }
@@ -542,8 +566,9 @@ async function loadPuzzles() {
   own.value = "";
   own.textContent = "— своя последовательность —";
   select.appendChild(own);
-  const tiers = { 1: "T1 · линейные", 2: "T2 · степени", 3: "T3 · смешанные" };
-  for (const tier of [1, 2, 3]) {
+  const tiers = { 1: "T1 · линейные", 2: "T2 · степени", 3: "T3 · смешанные",
+                  4: "T4 · новые операции" };
+  for (const tier of [1, 2, 3, 4]) {
     const group = document.createElement("optgroup");
     group.label = tiers[tier];
     for (const p of PUZZLE_CACHE.filter((x) => x.tier === tier)) {
@@ -554,6 +579,30 @@ async function loadPuzzles() {
     }
     select.appendChild(group);
   }
+  updateOpsHint();
+}
+
+const TOKEN_LABELS = {
+  "+": "+", "-": "−", "*": "×", "/": "÷", "^": "xʸ", mod: "%",
+  sqrt: "√", cbrt: "∛", fact: "!", abs: "|x|",
+  sin: "sin", cos: "cos", tan: "tan", ln: "ln", pi: "π", e: "e",
+};
+
+/* T4 puzzles are only solvable with the right grammar features on; when
+   one is selected, say which chips to flip instead of letting the run
+   fail silently. */
+function updateOpsHint() {
+  const el = $("opsReq");
+  const p = PUZZLE_CACHE.find((x) => x.id === $("puzzleSelect").value);
+  const missing = p && p.requires ? p.requires.filter((t) => !state.ops.has(t)) : [];
+  if (!missing.length) {
+    el.hidden = true;
+    return;
+  }
+  el.textContent = `загадке «${p.name}» нужны: ` +
+    missing.map((t) => TOKEN_LABELS[t] || t).join(", ") +
+    " — включи их в операциях";
+  el.hidden = false;
 }
 
 function markPuzzle(p) {
@@ -733,6 +782,7 @@ function bindControls() {
   $("puzzleSelect").addEventListener("change", (e) => {
     const p = PUZZLE_CACHE.find((x) => x.id === e.target.value);
     if (p) $("seqInput").value = p.terms.join(" ");
+    updateOpsHint();
   });
   $("pauseBtn").addEventListener("click", () => {
     control(state.status === "paused" ? "resume" : "pause");
@@ -793,6 +843,7 @@ function bindControls() {
       const on = !state.ops.has(op);
       state.ops[on ? "add" : "delete"](op);
       chip.setAttribute("aria-pressed", String(on));
+      updateOpsHint();
     });
   });
   syncOpsDisabled();
