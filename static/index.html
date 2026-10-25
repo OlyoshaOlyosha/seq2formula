@@ -6,7 +6,7 @@
 <title>seq2formula — поиск формулы</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
 <header class="topbar">
@@ -22,6 +22,7 @@
     <button class="ptab" id="ptabResults" role="tab" aria-selected="false">
       Результаты <span class="tab-dot" id="resultsDot" hidden></span>
     </button>
+    <button class="ptab" id="ptabSettings" role="tab" aria-selected="false">Настройки</button>
   </nav>
   <div class="topbar-status" id="connStatus"><span class="dot" id="connDot"></span><span id="connText">подключение…</span></div>
 </header>
@@ -67,7 +68,7 @@
         </div>
         <label class="speed field-inline">
           <span class="field-label">Скорость</span>
-          <input type="range" id="speedRange" min="1" max="40" step="1" value="10">
+          <input type="range" id="speedRange" min="1" max="60" step="1" value="10">
           <span class="num" id="speedValue">10 поколений/с</span>
         </label>
       </div>
@@ -122,9 +123,13 @@
       </div>
       <div class="live-grid" id="liveGrid" hidden>
         <div class="formula-hero">
-          <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span></div>
-          <div class="hero-formula" id="bestFormula" aria-live="polite"></div>
-          <div class="hero-sub num" id="bestSub"></div>
+          <div class="hero-main">
+            <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span></div>
+            <div class="hero-formula" id="bestFormula" aria-live="polite"></div>
+            <div class="hero-sub num" id="bestSub"></div>
+          </div>
+          <div class="hero-chart" id="heroChart"
+               title="Формула (линия) против последовательности (точки)"></div>
         </div>
         <div class="kpi-strip" id="kpiStrip">
           <div class="kpi" data-tip="Номер шага эволюции: каждое поколение отбирает лучшие формулы и выводит из них следующее поколение">
@@ -209,14 +214,87 @@
       </div>
     </section>
   </section>
+
+  <!-- ===== Settings: engine knobs ===== -->
+  <section id="paneSettings" hidden aria-label="Настройки">
+    <section class="panel settings-panel" aria-label="Настройки движка">
+      <div class="panel-head">
+        <h2 class="panel-title">Настройки</h2>
+        <span class="panel-meta" id="settingsMeta">применяются к следующим запускам, хранятся локально</span>
+      </div>
+      <form id="settingsForm" class="settings-grid">
+        <label class="field">
+          <span class="field-label">Популяция</span>
+          <input class="input" type="number" id="setPopulation" min="20" max="2000" step="1">
+          <span class="field-hint">20–2000 формул в поколении</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Максимум поколений</span>
+          <input class="input" type="number" id="setMaxGenerations" min="10" max="100000" step="1">
+          <span class="field-hint">10–100000; нерешённый прогон закончится ровно на этом числе</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Максимальная скорость</span>
+          <input class="input" type="number" id="setSpeedMax" min="10" max="240" step="1">
+          <span class="field-hint">поколений/с, верхняя граница ползунка (до 240)</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Штраф за размер</span>
+          <input class="input" type="number" id="setParsimony" min="0" max="0.1" step="0.001">
+          <span class="field-hint">0–0.1; выше — короче формулы, но медленнее сходимость</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Глубина деревьев</span>
+          <input class="input" type="number" id="setMaxDepth" min="3" max="12" step="1">
+          <span class="field-hint">3–12 узлов в самой длинной ветке</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Размер турнира</span>
+          <input class="input" type="number" id="setTournament" min="2" max="16" step="1">
+          <span class="field-hint">2–16; сколько случайных формул борются за отбор</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Вероятность кроссовера</span>
+          <input class="input" type="number" id="setPCrossover" min="0" max="1" step="0.05">
+          <span class="field-hint">0–1; доля потомков от скрещивания пар</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Вероятность мутации</span>
+          <input class="input" type="number" id="setPMutate" min="0" max="1" step="0.05">
+          <span class="field-hint">0–1; доля потомков с мутацией</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Элита</span>
+          <input class="input" type="number" id="setElitism" min="0" max="20" step="1">
+          <span class="field-hint">0–20; сколько лучших переходят в следующее поколение без изменений</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Поколений усадки</span>
+          <input class="input" type="number" id="setShrinkGenerations" min="0" max="2000" step="1">
+          <span class="field-hint">сколько искать формулу короче после решения</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Штраф усадки</span>
+          <input class="input" type="number" id="setShrinkParsimony" min="0" max="0.2" step="0.005">
+          <span class="field-hint">штраф за размер во время усадки (обычно сильно больше основного)</span>
+        </label>
+        <div class="settings-actions">
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+          <button type="button" class="btn" id="settingsReset">Сбросить к дефолтам</button>
+        </div>
+      </form>
+    </section>
+  </section>
 </main>
 
 <footer class="footer">
   <span>seq2formula — локальный поиск формул. Этап 1: генетическое программирование.</span>
 </footer>
 
+<div id="plotPopover" class="plot-popover" hidden></div>
+
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=7"></script>
+<script src="/static/app.js?v=9"></script>
 </body>
 </html>

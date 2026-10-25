@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 HISTORY_FILE = DATA_DIR / "history.json"
 CURIOSITY_FILE = DATA_DIR / "curiosities.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"
 HISTORY_CAP = 500        # solved runs kept in the file
 CURIOSITY_CAP = 60       # gallery entries kept across all runs
 CURIOSITY_PER_RUN = 4    # best entries saved from one run
@@ -44,6 +45,30 @@ CURIOSITY_PER_RUN = 4    # best entries saved from one run
 MIN_TERMS, MAX_TERMS = 2, 32
 TERM_ABS_LIMIT = 1e9
 DEFAULT_GPS = 10.0
+
+# Engine knobs the Настройки tab can change; a fresh store starts here.
+# Population/parsimony/max_generations default a RUN when the request does
+# not carry them; the rest configure GPConfig directly.
+DEFAULT_SETTINGS = {
+    "population": 500,
+    "max_generations": 10000,
+    "speed_max": 60,          # upper bound of the dashboard speed slider
+    "parsimony": 0.003,
+    "max_depth": 6,
+    "tournament": 3,
+    "p_crossover": 0.85,
+    "p_mutate": 0.25,
+    "elitism": 2,
+    "shrink_generations": 120,
+    "shrink_parsimony": 0.02,
+}
+
+
+def load_settings() -> dict:
+    stored = _load_json(SETTINGS_FILE, {})
+    settings = dict(DEFAULT_SETTINGS)
+    settings.update({k: v for k, v in stored.items() if k in DEFAULT_SETTINGS})
+    return settings
 
 app = FastAPI(title="seq2formula")
 
@@ -98,11 +123,25 @@ def hall_of_fame() -> list[dict]:
 class RunRequest(BaseModel):
     terms: list[float] | None = None
     puzzle_id: str | None = None
-    population: int = Field(default=300, ge=20, le=2000)
-    parsimony: float = Field(default=0.003, ge=0.0, le=0.1)
-    max_generations: int = Field(default=1000, ge=10, le=5000)
-    speed: float = Field(default=DEFAULT_GPS, ge=0.5, le=60)
+    population: int | None = Field(default=None, ge=20, le=2000)
+    parsimony: float | None = Field(default=None, ge=0.0, le=0.1)
+    max_generations: int | None = Field(default=None, ge=10, le=100000)
+    speed: float = Field(default=DEFAULT_GPS, ge=0.5, le=240)
     ops: list[str] | None = None  # feature tokens (ops/funcs/consts); None = all
+
+
+class SettingsRequest(BaseModel):
+    population: int = Field(ge=20, le=2000)
+    max_generations: int = Field(ge=10, le=100000)
+    speed_max: float = Field(ge=10, le=240)
+    parsimony: float = Field(ge=0.0, le=0.1)
+    max_depth: int = Field(ge=3, le=12)
+    tournament: int = Field(ge=2, le=16)
+    p_crossover: float = Field(ge=0.0, le=1.0)
+    p_mutate: float = Field(ge=0.0, le=1.0)
+    elitism: int = Field(ge=0, le=20)
+    shrink_generations: int = Field(ge=0, le=2000)
+    shrink_parsimony: float = Field(ge=0.0, le=0.2)
 
 
 class ControlRequest(BaseModel):
@@ -110,7 +149,7 @@ class ControlRequest(BaseModel):
 
 
 class SpeedRequest(BaseModel):
-    gps: float = Field(ge=0.5, le=60)
+    gps: float = Field(ge=0.5, le=240)
 
 
 class RunManager:
@@ -148,10 +187,22 @@ class RunManager:
         self.stop(reason="replaced", notify=False)
         allowed_ops, allowed_funcs, allowed_consts = \
             self._validate_grammar(request.ops)
+        settings = load_settings()
         config = GPConfig(
-            population=request.population,
-            parsimony=request.parsimony,
-            max_generations=request.max_generations,
+            population=(request.population if request.population is not None
+                        else settings["population"]),
+            parsimony=(request.parsimony if request.parsimony is not None
+                       else settings["parsimony"]),
+            max_generations=(request.max_generations
+                             if request.max_generations is not None
+                             else settings["max_generations"]),
+            max_depth=settings["max_depth"],
+            tournament=settings["tournament"],
+            p_crossover=settings["p_crossover"],
+            p_mutate=settings["p_mutate"],
+            elitism=settings["elitism"],
+            shrink_generations=settings["shrink_generations"],
+            shrink_parsimony=settings["shrink_parsimony"],
             allowed_ops=allowed_ops,
             allowed_funcs=allowed_funcs,
             allowed_consts=allowed_consts,
@@ -291,6 +342,8 @@ class RunManager:
                 "formula": to_text(best.node),
                 "formula_ast": to_dict(best.node),
                 "size": best.score.size,
+                "values": ([round(v, 6) for v in best.score.values]
+                           if best.score.values else None),
                 "generations": self.engine.solved_gen + 1,
                 "time_s": round(self.solved_wall_time or
                                 (time.perf_counter() - self.started_at), 3),
@@ -333,6 +386,7 @@ class RunManager:
                 "formula_ast": item["formula"]["ast"],
                 "size": item["formula"]["size"],
                 "error": item["formula"]["error"],
+                "values": item["formula"]["values"],
                 "sequence": self.terms,
                 "gen": item["gen"],
             })
@@ -372,6 +426,17 @@ def get_hall() -> dict:
 @app.get("/api/curiosities")
 def get_curiosities() -> dict:
     return {"curiosities": _load_json(CURIOSITY_FILE, [])}
+
+
+@app.get("/api/settings")
+def get_settings() -> dict:
+    return {"settings": load_settings(), "defaults": DEFAULT_SETTINGS}
+
+
+@app.post("/api/settings")
+def post_settings(request: SettingsRequest) -> dict:
+    _save_json(SETTINGS_FILE, request.model_dump())
+    return {"settings": load_settings(), "defaults": DEFAULT_SETTINGS}
 
 
 @app.get("/api/status")

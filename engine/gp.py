@@ -52,13 +52,16 @@ class GPConfig:
     p_mutate: float = 0.25
     elitism: int = 2
     parsimony: float = 0.003
-    max_generations: int = 1000
+    max_generations: int = 10000
     seed: int | None = None
     allowed_ops: tuple[str, ...] | None = None    # None = all BINARY_OPS
     # v2 features default OFF so a plain GPConfig() searches exactly the
     # v1 space (tuned convergence); None explicitly means "all of them".
     allowed_funcs: tuple[str, ...] | None = ()
     allowed_consts: tuple[str, ...] | None = ()
+    # shrink-phase knobs, exposed to the settings tab
+    shrink_generations: int = SHRINK_GENERATIONS
+    shrink_parsimony: float = SHRINK_PARSIMONY
 
 
 @dataclass
@@ -145,13 +148,15 @@ class GPEngine:
         solved and the shrink phase is over."""
         if self.generation >= self.cfg.max_generations:
             return True
-        return self.solved and self.generation - self.solved_gen >= SHRINK_GENERATIONS
+        return (self.solved
+                and self.generation - self.solved_gen >= self.cfg.shrink_generations)
 
     def step(self) -> GenerationResult:
         started = time.perf_counter()
         # Once solved, the selection race is about shortness: a heavy
         # parsimony weight makes any size difference outweigh error noise.
-        parsimony = SHRINK_PARSIMONY if self.solved else self.cfg.parsimony
+        parsimony = (self.cfg.shrink_parsimony if self.solved
+                     else self.cfg.parsimony)
         scored = [(node, score_candidate(node, self.seq, parsimony))
                   for node in self.population]
         # Stats come from the raw scores: the winner-take-all override

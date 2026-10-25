@@ -20,6 +20,8 @@ const state = {
   lastGenNum: null,
   lastExactSize: Infinity,
   ops: new Set(["+", "-", "*", "/", "^"]),  // enabled binary operators
+  settings: null,          // engine knobs from /api/settings (Настройки tab)
+  settingDefaults: null,
 };
 
 /* ---------- formatting ---------- */
@@ -229,6 +231,21 @@ function makeCharts() {
       axes: [axisX, axisOpts()] },
     [[], []], $("chartSizes"));
 
+  // hero mini-chart: the formula (line) against the target sequence (dots)
+  const dots = (size) => window.uPlot && uPlot.paths && uPlot.paths.points
+    ? uPlot.paths.points({ size }) : undefined;
+  state.charts.hero = new uPlot(
+    { ...baseOpts(110, [
+        { label: "n" },
+        { label: "цель", stroke: CHART_COLORS.faint, width: 0, paths: dots(5),
+          points: { show: true } },
+        { label: "формула", stroke: CHART_COLORS.accent, width: 2,
+          points: { show: true, size: 3 } },
+      ], false),
+      scales: { x: { time: false } },
+      axes: [{ show: false }, { show: false }] },
+    [[], [], []], $("heroChart"));
+
   resizeCharts();
 }
 
@@ -236,6 +253,7 @@ function resizeCharts() {
   const boxes = [
     ["fitness", "chartFitness"], ["error", "chartError"],
     ["diversity", "chartDiversity"], ["sizes", "chartSizes"],
+    ["hero", "heroChart"],
   ];
   for (const [key, id] of boxes) {
     const el = $(id);
@@ -258,6 +276,7 @@ function resetBuffers() {
   state.raceLog = [];
   state.lastExactSize = Infinity;
   state.lastGenNum = null;
+  if (state.charts.hero) state.charts.hero.setData([[], [], []]);
   renderRaceLog();
 }
 
@@ -321,8 +340,8 @@ function applyGen(msg) {
   b.sizesX = s.size_hist.map((_, i) => i + 1);
   b.sizesY = s.size_hist;
 
-  // KPIs
-  $("kpiGen").textContent = String(msg.gen);
+  // KPIs (generations are 1-based: a 10000-gen run ends on "10000")
+  $("kpiGen").textContent = String(msg.gen + 1);
   const errEl = $("kpiError");
   errEl.textContent = msg.best.error === null ? "∞" : fmtPercent(msg.best.error);
   errEl.classList.toggle("ok", msg.best.error !== null && msg.best.error < 1e-9);
@@ -355,7 +374,88 @@ function applyGen(msg) {
   renderTop(msg.top || []);
   updateRaceLog(msg);
   renderTerms(msg.best);
+  updateHeroChart(msg.best.values);
   scheduleChartUpdate();
+}
+
+/* hero mini-chart: formula vs target dots, redrawn every gen. The y
+   window is pinned to the target sequence: a candidate with far-out
+   values would stretch the scale and squash everything into bands, so
+   out-of-window formula points are hidden (the line breaks there). */
+function heroWindow(sequence) {
+  const nums = sequence.map(Number);
+  const lo = Math.min(...nums), hi = Math.max(...nums);
+  const pad = Math.max(0.5, (hi - lo) * 0.15);
+  return [lo - pad, hi + pad];
+}
+
+function prepPlotData(sequence, values) {
+  const [yLo, yHi] = heroWindow(sequence);
+  const xs = sequence.map((_, i) => i + 1);
+  const got = Array.isArray(values) && values.length === sequence.length
+    ? values.map((v) => (v === null || v < yLo || v > yHi ? null : v))
+    : xs.map(() => null);
+  return [xs, sequence.map(Number), got];
+}
+
+function updateHeroChart(values) {
+  const seq = state.puzzleTerms;
+  const chart = state.charts.hero;
+  if (!seq || !seq.length || !chart) return;
+  chart.setData(prepPlotData(seq, values));
+}
+
+/* ---------- hover plot previews (history / hall / curiosities) ---------- */
+
+function showPlotPopover(evt, sequence, values) {
+  if (!Array.isArray(sequence) || !sequence.length) return;
+  const pop = $("plotPopover");
+  pop.hidden = false;
+  if (!state.charts.popover) {
+    state.charts.popover = new uPlot(
+      { ...baseOpts(150, [
+          { label: "n" },
+          { label: "цель", stroke: CHART_COLORS.faint, width: 0,
+            paths: window.uPlot && uPlot.paths && uPlot.paths.points
+              ? uPlot.paths.points({ size: 4 }) : undefined,
+            points: { show: true } },
+          { label: "формула", stroke: CHART_COLORS.accent, width: 2,
+            points: { show: true, size: 3 } },
+        ], false),
+        scales: { x: { time: false } },
+        axes: [{ ...axisOpts(), values: (u, vals) => vals.map((v) => String(Math.round(v))) },
+               { ...axisOpts(3), values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
+      [[], [], []], pop);
+  }
+  const W = 320, H = 190;
+  pop.style.left = Math.max(8, Math.min(evt.clientX + 14,
+    window.innerWidth - W - 10)) + "px";
+  pop.style.top = Math.max(8, Math.min(evt.clientY + 12,
+    window.innerHeight - H - 10)) + "px";
+  state.charts.popover.setSize({ width: W - 16, height: H - 40 });
+  state.charts.popover.setData(prepPlotData(sequence, values));
+}
+
+function hidePlotPopover() {
+  $("plotPopover").hidden = true;
+}
+
+function bindPlotHover(el, getData) {
+  el.addEventListener("mouseenter", (e) => {
+    const [seq, vals] = getData();
+    showPlotPopover(e, seq, vals);
+  });
+  el.addEventListener("mousemove", (e) => {
+    const pop = $("plotPopover");
+    if (!pop.hidden) {
+      const W = 320, H = 190;
+      pop.style.left = Math.max(8, Math.min(e.clientX + 14,
+        window.innerWidth - W - 10)) + "px";
+      pop.style.top = Math.max(8, Math.min(e.clientY + 12,
+        window.innerHeight - H - 10)) + "px";
+    }
+  });
+  el.addEventListener("mouseleave", hidePlotPopover);
 }
 
 function renderTop(top) {
@@ -380,8 +480,11 @@ function renderTop(top) {
   });
 }
 
-function pushLogEntry(text, cls) {
-  state.raceLog.unshift({ text, cls, gen: state.lastGenNum });
+function pushLogEntry(parts) {
+  // parts: {pre, latex, text, cls} — pre/text are plain text, latex is
+  // rendered as math between them
+  parts.gen = state.lastGenNum;
+  state.raceLog.unshift(parts);
   if (state.raceLog.length > 7) state.raceLog.pop();
   renderRaceLog();
 }
@@ -394,11 +497,26 @@ function renderRaceLog() {
     li.className = "race-log-item" + (e.cls ? " " + e.cls : "");
     const g = document.createElement("span");
     g.className = "race-log-gen num";
-    g.textContent = e.gen === null || e.gen === undefined ? "—" : "пок. " + e.gen;
+    // generations are 1-based everywhere on the dashboard
+    g.textContent = e.gen === null || e.gen === undefined
+      ? "—" : "пок. " + (e.gen + 1);
     li.appendChild(g);
-    const t = document.createElement("span");
-    t.textContent = e.text;
-    li.appendChild(t);
+    if (e.pre) {
+      const pre = document.createElement("span");
+      pre.textContent = e.pre + " ";
+      li.appendChild(pre);
+    }
+    if (e.latex) {
+      const f = document.createElement("span");
+      f.className = "race-log-formula";
+      renderKatex(f, e.latex, false);
+      li.appendChild(f);
+    }
+    if (e.text) {
+      const t = document.createElement("span");
+      t.textContent = e.latex ? " " + e.text : e.text;
+      li.appendChild(t);
+    }
     list.appendChild(li);
   });
 }
@@ -406,15 +524,21 @@ function renderRaceLog() {
 function updateRaceLog(msg) {
   state.lastGenNum = msg.gen;
   if (msg.solved_now) {
-    pushLogEntry("точное совпадение найдено", "log-solved");
+    pushLogEntry({ pre: "точное совпадение найдено", cls: "log-solved" });
   } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
-    pushLogEntry(`усадка: формула короче — ${msg.best.size} узлов`, "log-shrink");
+    pushLogEntry({
+      pre: "усадка: формула короче —", text: `${msg.best.size} узлов`,
+      cls: "log-shrink",
+    });
   }
   state.lastExactSize = msg.best.exact ? msg.best.size : state.lastExactSize;
   if (msg.new_best && !msg.best.exact) {
-    pushLogEntry(`новая лучшая: ${msg.best.text} (ошибка ${fmtPercent(msg.best.error)})`);
+    pushLogEntry({
+      pre: "новая лучшая:", latex: astToLatex(msg.best.ast),
+      text: `ошибка ${fmtPercent(msg.best.error)}`,
+    });
   } else if (msg.new_best && msg.best.exact && !msg.solved_now) {
-    pushLogEntry(`новая лучшая: ${msg.best.text}`);
+    pushLogEntry({ pre: "новая лучшая:", latex: astToLatex(msg.best.ast) });
   }
 }
 
@@ -468,9 +592,11 @@ function applySolved(msg) {
   setStatus("finished");
   setChip("решено", "solved");
   $("resultsDot").hidden = false;
-  pushLogEntry(
-    `решено: ${msg.formula_text || "—"} — ${msg.generations} поколений, ${fmtTime(msg.time_s)}`,
-    "log-solved");
+  pushLogEntry({
+    pre: "решено:", latex: msg.formula ? astToLatex(msg.formula) : null,
+    text: `${msg.generations} поколений, ${fmtTime(msg.time_s)}`,
+    cls: "log-solved",
+  });
   if (msg.formula) {
     renderKatex($("bestFormula"), astToLatex(msg.formula), true);
   }
@@ -644,6 +770,7 @@ async function loadHistory() {
     else f.textContent = h.formula;
     addCell(tr, "td", String(h.generations), "num");
     addCell(tr, "td", fmtTime(h.time_s), "num");
+    bindPlotHover(tr, () => [h.sequence, h.values]);
     rows.appendChild(tr);
   }
 }
@@ -669,6 +796,7 @@ async function loadHall() {
     if (h.formula_ast) renderKatex(f, astToLatex(h.formula_ast), false);
     else f.textContent = h.formula;
     addCell(tr, "td", String(h.size), "num");
+    bindPlotHover(tr, () => [h.sequence, h.values]);
     rows.appendChild(tr);
   }
 }
@@ -693,11 +821,15 @@ async function loadCuriosities() {
     item.appendChild(f);
     const meta = document.createElement("div");
     meta.className = "curio-meta";
+    const seqText = Array.isArray(c.sequence) && c.sequence.length
+      ? `<span>для <b>${c.sequence.map(fmtNum).join(" ")}</b></span>` : "";
     meta.innerHTML =
+      seqText +
       `<span>размер <b>${c.size}</b></span>` +
       `<span>ошибка <b>${fmtPercent(c.error)}</b></span>` +
-      `<span>поколение <b>${c.gen}</b></span>`;
+      `<span>поколение <b>${c.gen + 1}</b></span>`;
     item.appendChild(meta);
+    bindPlotHover(item, () => [c.sequence, c.values]);
     list.appendChild(item);
   }
 }
@@ -776,6 +908,91 @@ const RESULT_META = {
   curio: "почти правильные, но громоздкие монстры — следы блуждания эволюции",
 };
 
+/* ---------- settings (Настройки tab) ---------- */
+
+const SETTING_FIELDS = [
+  ["setPopulation", "population"],
+  ["setMaxGenerations", "max_generations"],
+  ["setSpeedMax", "speed_max"],
+  ["setParsimony", "parsimony"],
+  ["setMaxDepth", "max_depth"],
+  ["setTournament", "tournament"],
+  ["setPCrossover", "p_crossover"],
+  ["setPMutate", "p_mutate"],
+  ["setElitism", "elitism"],
+  ["setShrinkGenerations", "shrink_generations"],
+  ["setShrinkParsimony", "shrink_parsimony"],
+];
+
+async function loadSettings() {
+  const data = await api("/api/settings");
+  state.settings = data.settings;
+  state.settingDefaults = data.defaults;
+  fillSettingsForm();
+  applySpeedMax();
+}
+
+function fillSettingsForm() {
+  if (!state.settings) return;
+  for (const [id, key] of SETTING_FIELDS) {
+    $(id).value = String(state.settings[key]);
+  }
+}
+
+/* the speed slider's upper bound is a setting; keep the slider honest */
+function applySpeedMax() {
+  if (!state.settings) return;
+  const slider = $("speedRange");
+  const max = Math.round(state.settings.speed_max);
+  slider.max = String(max);
+  if (Number(slider.value) > max) {
+    slider.value = String(max);
+    $("speedValue").textContent = `${max} поколений/с`;
+    setSpeed(max);
+  }
+}
+
+async function saveSettings(event) {
+  if (event) event.preventDefault();
+  const body = {};
+  for (const [id, key] of SETTING_FIELDS) body[key] = Number($(id).value);
+  try {
+    const data = await api("/api/settings", body);
+    state.settings = data.settings;
+    state.settingDefaults = data.defaults;
+    fillSettingsForm();
+    applySpeedMax();
+    flashSettingsMeta("сохранено — применяется к следующим запускам");
+  } catch (e) {
+    alertErr("не удалось сохранить настройки: " + e.message);
+  }
+}
+
+async function resetSettings() {
+  if (!state.settingDefaults) return;
+  try {
+    const data = await api("/api/settings", state.settingDefaults);
+    state.settings = data.settings;
+    state.settingDefaults = data.defaults;
+    fillSettingsForm();
+    applySpeedMax();
+    flashSettingsMeta("вернули значения по умолчанию");
+  } catch (e) {
+    alertErr("не удалось сбросить настройки: " + e.message);
+  }
+}
+
+function flashSettingsMeta(text) {
+  const el = $("settingsMeta");
+  el.textContent = text;
+  el.classList.add("ok");
+  clearTimeout(flashSettingsMeta.timer);
+  flashSettingsMeta.timer = setTimeout(() => {
+    el.textContent = "применяются к следующим запускам, хранятся локально";
+    el.classList.remove("ok");
+  }, 2500);
+}
+
 function bindControls() {
   $("runForm").addEventListener("submit", startRun);
   $("seqInput").addEventListener("input", () => { $("puzzleSelect").value = ""; });
@@ -810,8 +1027,9 @@ function bindControls() {
   }
   $("resultsMeta").textContent = RESULT_META.history;
 
-  // top-level page tabs: Поиск / Результаты
-  const panes = [["ptabSearch", "paneSearch"], ["ptabResults", "paneResults"]];
+  // top-level page tabs: Поиск / Результаты / Настройки
+  const panes = [["ptabSearch", "paneSearch"], ["ptabResults", "paneResults"],
+                 ["ptabSettings", "paneSettings"]];
   for (const [tabId, paneId] of panes) {
     $(tabId).addEventListener("click", () => {
       for (const [t, p] of panes) {
@@ -824,6 +1042,10 @@ function bindControls() {
       }
     });
   }
+
+  // settings form: save / reset, slider upper bound follows speed_max
+  $("settingsForm").addEventListener("submit", saveSettings);
+  $("settingsReset").addEventListener("click", resetSettings);
 
   // operator picker: toggle chips, block a run without any operator
   const syncOpsDisabled = () => {
@@ -851,7 +1073,8 @@ function bindControls() {
   // re-fit charts when any chart container changes size (viewport
   // changes and pane switches); window resize alone misses both
   const ro = new ResizeObserver(resizeCharts);
-  for (const id of ["chartFitness", "chartError", "chartDiversity", "chartSizes"]) {
+  for (const id of ["chartFitness", "chartError", "chartDiversity", "chartSizes",
+                    "heroChart"]) {
     ro.observe($(id));
   }
 
@@ -864,5 +1087,6 @@ resetBuffers();
 makeCharts();
 bindControls();
 refreshAll();
+loadSettings().catch(() => {});
 connectWS();
 setStatus("idle");
