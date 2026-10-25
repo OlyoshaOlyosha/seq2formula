@@ -23,8 +23,7 @@ from __future__ import annotations
 
 import random
 
-from .nodes import (BinOp, Const, Neg, Node, UnOp, UNARY_FUNCS, Var, VAR,
-                    depth, size)
+from .nodes import VAR, BinOp, Const, Neg, Node, UnOp, Var, depth, size
 
 BINARY_OPS = ("+", "-", "*", "/", "^", "mod")
 CONST_RANGE = (-5, 5)
@@ -131,21 +130,64 @@ def replace_subtree(node: Node, path: tuple[int, ...], new: Node) -> Node:
     return node
 
 
-def _all_paths(node: Node, path: tuple[int, ...] = ()):
-    yield path
-    if isinstance(node, BinOp):
-        yield from _all_paths(node.left, path + (0,))
-        yield from _all_paths(node.right, path + (1,))
-    elif isinstance(node, (Neg, UnOp)):
-        yield from _all_paths(node.child, path + (0,))
-
-
 def random_path(rng: random.Random, node: Node) -> tuple[int, ...]:
     """Path to a node chosen uniformly among ALL nodes — roots and
     internal nodes included, not just terminals. A descent that walks
     until it hits a leaf only ever mutates leaves, which silently
-    cripples every genetic operator."""
-    return rng.choice(list(_all_paths(node)))
+    cripples every genetic operator.
+
+    Picks the k-th node in preorder (the same order the old path-listing
+    walk produced) with a single counting descent — building the whole
+    path list per operator call was a hot-loop cost."""
+    k = rng.randrange(size(node))
+    path: tuple[int, ...] = ()
+    while k:
+        k -= 1
+        if isinstance(node, BinOp):
+            left_size = size(node.left)
+            if k < left_size:
+                node, path = node.left, path + (0,)
+            else:
+                k -= left_size
+                node, path = node.right, path + (1,)
+        elif isinstance(node, (Neg, UnOp)):
+            node, path = node.child, path + (0,)
+        else:  # leaf: k was within the subtree, so it must be 0 here
+            break
+    return path
+
+
+def _repair_splice(node: Node, path: tuple[int, ...], rng: random.Random,
+                   ops: tuple[str, ...]) -> Node:
+    """Repair a freshly spliced tree by walking only the splice path.
+
+    Parents are always valid grammar (the population invariant), so the
+    only damage a splice can do is under a `^` that sits on the path and
+    lost its constant child to the graft. Re-roll a constant exponent
+    there — or swap the operator when ^ is disabled. The grafted subtree
+    itself was built by valid operators and needs no walk."""
+    if not path:
+        return node  # the graft point: replacement is valid by construction
+    step, rest = path[0], path[1:]
+    if isinstance(node, BinOp):
+        if step == 0:
+            left = _repair_splice(node.left, rest, rng, ops)
+            right = node.right
+        else:
+            left = node.left
+            right = _repair_splice(node.right, rest, rng, ops)
+        if node.op == "^" and not isinstance(left, Const) \
+                and not isinstance(right, Const):
+            if "^" in ops:
+                right = _rand_exp(rng)
+            else:
+                return BinOp(rng.choice(ops), left, right)
+        return BinOp(node.op, left, right)
+    if isinstance(node, UnOp):
+        return UnOp(node.name, _repair_splice(node.child, rest, rng, ops))
+    if isinstance(node, Neg):
+        return Neg(_repair_splice(node.child, rest, rng, ops))
+    return node
 
 
 def ensure_grammar(node: Node, rng: random.Random,
@@ -203,8 +245,8 @@ def subtree_mutation(rng: random.Random, tree: Node,
     path = random_path(rng, tree)
     budget = max(1, max_depth - len(path))
     replacement = random_tree(rng, min(3, budget), "grow", ops, funcs, specials)
-    return ensure_grammar(replace_subtree(tree, path, replacement), rng,
-                          ops, funcs, specials)
+    return _repair_splice(replace_subtree(tree, path, replacement), path,
+                          rng, ops)
 
 
 def shrink_mutation(rng: random.Random, tree: Node,
@@ -214,7 +256,8 @@ def shrink_mutation(rng: random.Random, tree: Node,
     x/x subterms has to happen fast, not wait for lucky crossovers."""
     path = random_path(rng, tree)
     replacement = VAR if rng.random() < 0.7 else _rand_const(rng, specials)
-    return replace_subtree(tree, path, replacement)
+    return _repair_splice(replace_subtree(tree, path, replacement), path,
+                          rng, BINARY_OPS)
 
 
 def point_mutation(rng: random.Random, tree: Node,
@@ -254,8 +297,9 @@ def crossover(rng: random.Random, a: Node, b: Node,
     """Subtree swap; retries a few times to respect the depth limit,
     falls back to a copy of parent a (elitism still guards progress)."""
     for _ in range(6):
-        child = replace_subtree(a, random_path(rng, a), subtree_at(b, random_path(rng, b)))
-        child = ensure_grammar(child, rng, ops, funcs, specials)
+        path = random_path(rng, a)
+        child = replace_subtree(a, path, subtree_at(b, random_path(rng, b)))
+        child = _repair_splice(child, path, rng, ops)
         if depth(child) <= max_depth:
             return child
     return a

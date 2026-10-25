@@ -17,11 +17,16 @@ import random
 import time
 from dataclasses import dataclass, field
 
-from .fitness import Score, INVALID_FITNESS, score_candidate
-from .grammar import (BINARY_OPS, MAX_INIT_DEPTH, crossover,
-                      initial_population, point_mutation, shrink_mutation,
-                      subtree_mutation)
-from .nodes import Node, UNARY_FUNCS, special_value, size, to_dict, to_text
+from .fitness import INVALID_FITNESS, Score, score_candidate
+from .grammar import (
+    BINARY_OPS,
+    crossover,
+    initial_population,
+    point_mutation,
+    shrink_mutation,
+    subtree_mutation,
+)
+from .nodes import UNARY_FUNCS, Node, special_value, to_dict, to_text
 
 # Curiosity gallery: "almost correct" (mean error below) but comically
 # overbuilt (size at least) formulas, deduped by the values they produce.
@@ -138,6 +143,7 @@ class GPEngine:
         self.shortest_exact: Best | None = None
         self.solved = False
         self.solved_gen: int | None = None
+        self._exact_pool: list[tuple[Node, Score]] = []
         self.curiosities: dict[tuple, dict] = {}
 
     # -- one generation -------------------------------------------------
@@ -171,6 +177,7 @@ class GPEngine:
                 if not sc.exact:
                     sc.fitness = INVALID_FITNESS
         scored.sort(key=lambda pair: pair[1].fitness, reverse=True)
+        self._exact_pool = [pair for pair in scored if pair[1].exact]
         best_node, best_score = scored[0]
 
         new_best = (self.best_ever is None
@@ -223,8 +230,7 @@ class GPEngine:
             # Elites must stay exact: with shrink parsimony a short
             # almost-correct tree could outscore a long exact one and
             # drag the population back off the solution.
-            exact = sorted((pair for pair in scored if pair[1].exact),
-                           key=lambda pair: pair[1].size)
+            exact = sorted(self._exact_pool, key=lambda pair: pair[1].size)
             pool = exact if exact else scored
             elite = [node for node, _ in pool[:cfg.elitism]]
         else:
@@ -256,20 +262,30 @@ class GPEngine:
         return elite + offspring
 
     def _tournament(self, scored: list[tuple[Node, Score]]) -> Node:
+        randrange = self.rng.randrange
         if self.solved:
             # During the shrink phase, breed only within the exact pool:
             # with two elites in 500 trees a blind tournament never picks
             # them, exact genes never spread, and shortening stalls.
-            exact = [pair for pair in scored if pair[1].exact]
+            # (scored is fitness-sorted, so a plain scan finds winners.)
+            exact = self._exact_pool
             if len(exact) >= 2:
-                contenders = [exact[self.rng.randrange(len(exact))]
-                              for _ in range(self.cfg.tournament)]
-                winner = max(contenders, key=lambda pair: pair[1].fitness)
-                return winner[0]
-        contenders = [scored[self.rng.randrange(len(scored))]
-                      for _ in range(self.cfg.tournament)]
-        winner = max(contenders, key=lambda pair: pair[1].fitness)
-        return winner[0]
+                n = len(exact)
+                winner, win_fit = exact[randrange(n)]
+                win_fit = win_fit.fitness
+                for _ in range(self.cfg.tournament - 1):
+                    node, sc = exact[randrange(n)]
+                    if sc.fitness > win_fit:
+                        winner, win_fit = node, sc.fitness
+                return winner
+        n = len(scored)
+        winner, win_fit = scored[randrange(n)]
+        win_fit = win_fit.fitness
+        for _ in range(self.cfg.tournament - 1):
+            node, sc = scored[randrange(n)]
+            if sc.fitness > win_fit:
+                winner, win_fit = node, sc.fitness
+        return winner
 
     # -- statistics -----------------------------------------------------
 

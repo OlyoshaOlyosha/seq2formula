@@ -44,7 +44,7 @@ CURIOSITY_PER_RUN = 4    # best entries saved from one run
 
 MIN_TERMS, MAX_TERMS = 2, 32
 TERM_ABS_LIMIT = 1e9
-DEFAULT_GPS = 10.0
+DEFAULT_GPS = 30.0
 
 # Engine knobs the Настройки tab can change; a fresh store starts here.
 # Population/parsimony/max_generations default a RUN when the request does

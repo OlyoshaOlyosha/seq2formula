@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 
-from .nodes import BinOp, Const, Neg, Node, UnOp, Var
+from .nodes import Const, Neg, Node, UnOp, Var
 
 # Anything beyond this magnitude counts as overflow: it already dwarfs
 # every sane sequence target and keeps the fitness math in safe ranges.
@@ -89,10 +89,62 @@ def _eval(node: Node, n: float) -> float:
     return left ** right  # ^
 
 
+def compile_node(node: Node):
+    """Turn an AST into a Python closure: one small callable per node,
+    composed bottom-up. Scoring is the engine's hot loop — the closure
+    chain replaces per-node isinstance dispatch with direct function
+    calls, several times faster on population-sized generations."""
+    if isinstance(node, Const):
+        value = node.value
+        return lambda n: value
+    if isinstance(node, Var):
+        return lambda n: n
+    if isinstance(node, Neg):
+        child = compile_node(node.child)
+        return lambda n: -child(n)
+    if isinstance(node, UnOp):
+        fn = UNARY_EVAL.get(node.name)
+        if fn is None:
+            raise ValueError(f"unknown function: {node.name!r}")
+        child = compile_node(node.child)
+        return lambda n: fn(child(n))
+    op = node.op
+    left = compile_node(node.left)
+    right = compile_node(node.right)
+    if op == "+":
+        return lambda n: left(n) + right(n)
+    if op == "-":
+        return lambda n: left(n) - right(n)
+    if op == "*":
+        return lambda n: left(n) * right(n)
+    if op == "/":
+        return lambda n: left(n) / right(n)
+    if op == "mod":
+        return lambda n: left(n) % right(n)
+    return lambda n: left(n) ** right(n)
+
+
 def evaluate_all(node: Node, length: int) -> list[float] | None:
     """Values for n = 1..length, or None if the candidate blows up
-    anywhere — the caller treats None as an invalid formula."""
-    values = [evaluate(node, i) for i in range(1, length + 1)]
-    if math.inf in values:
-        return None
+    anywhere — the caller treats None as an invalid formula.
+
+    Runs the compiled closure once per term inside a single guard:
+    any exception, complex result, non-finite or BIG-overflowing value
+    invalidates the whole candidate."""
+    try:
+        fn = compile_node(node)
+    except ValueError:
+        return None  # unknown function name: corrupt AST, invalid formula
+    values = []
+    for i in range(1, length + 1):
+        try:
+            value = fn(i)
+        except (ZeroDivisionError, OverflowError, ValueError, TypeError):
+            return None
+        # A fractional power of a negative base returns complex, not an
+        # exception — check the type before isfinite, which raises on complex.
+        if isinstance(value, complex) or not math.isfinite(value) \
+                or abs(value) > BIG:
+            return None
+        values.append(value)
     return values
