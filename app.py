@@ -56,7 +56,7 @@ DEFAULT_SETTINGS = {
     "parsimony": 0.003,
     "max_depth": 6,
     "tournament": 3,
-    "p_crossover": 0.85,
+    "p_crossover": 1.0,       # sweep.py 2026-10-25: 40/41 puzzles vs 39
     "p_mutate": 0.25,
     "elitism": 2,
     "shrink_generations": 120,

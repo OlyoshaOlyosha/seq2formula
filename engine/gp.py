@@ -62,7 +62,9 @@ class GPConfig:
     population: int = 500
     max_depth: int = 6
     tournament: int = 3
-    p_crossover: float = 0.85
+    # Crossover on every child (mutations apply on top): the sweep over
+    # 41 puzzles x 4 seeds solved one more puzzle than 0.85 with no losses.
+    p_crossover: float = 1.0
     p_mutate: float = 0.25
     elitism: int = 2
     parsimony: float = 0.003
