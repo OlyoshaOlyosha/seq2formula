@@ -22,10 +22,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from engine import GPConfig, GPEngine, UNARY_FUNCS, from_dict, to_dict, to_text
+from engine import UNARY_FUNCS, GPConfig, GPEngine, to_dict, to_text
 from engine.grammar import BINARY_OPS
-from engine.gp import SHRINK_GENERATIONS
-from engine.nodes import special_value
 
 # Grammar feature tokens the dashboard may send in RunRequest.ops: binary
 # operators, unary functions and special constants, one flat list — the
@@ -97,11 +95,6 @@ def _seq_key(terms: list[float]) -> str:
 def load_puzzles() -> list[dict]:
     data = _load_json(ROOT / "sequences.json", {"puzzles": []})
     return data.get("puzzles", [])
-
-
-def solved_sequences() -> set[str]:
-    return {entry["seq_key"] for entry in _load_json(HISTORY_FILE, [])
-            if entry.get("solved")}
 
 
 def hall_of_fame() -> list[dict]:
@@ -403,14 +396,49 @@ manager = RunManager()
 
 @app.get("/api/puzzles")
 def get_puzzles() -> dict:
-    solved = solved_sequences()
-    puzzles = []
-    for puzzle in load_puzzles():
-        item = dict(puzzle)
-        if _seq_key([float(t) for t in puzzle["terms"]]) not in solved:
-            item["reference"] = None  # revealed only once solved
-        puzzles.append(item)
-    return {"puzzles": puzzles}
+    # Reference formulas are shown up front: single-user local toy, the
+    # owner wants the target answer visible while watching the search.
+    return {"puzzles": load_puzzles()}
+
+
+@app.get("/api/stats")
+def get_stats() -> dict:
+    """Library-wide summary derived from history + the puzzle list:
+    solved fraction, per-tier aggregates and personal records."""
+    history = _load_json(HISTORY_FILE, [])
+    puzzles = load_puzzles()
+    # best (fewest generations) per solved sequence
+    best: dict[str, dict] = {}
+    for entry in history:
+        if not entry.get("solved"):
+            continue
+        key = entry["seq_key"]
+        current = best.get(key)
+        if current is None or entry["generations"] < current["generations"]:
+            best[key] = entry
+    by_tier = []
+    for tier in (1, 2, 3, 4, 5):
+        tier_puzzles = [p for p in puzzles if p["tier"] == tier]
+        tier_best = []
+        for p in tier_puzzles:
+            entry = best.get(_seq_key([float(t) for t in p["terms"]]))
+            if entry:
+                tier_best.append(entry)
+        gens = [e["generations"] for e in tier_best]
+        by_tier.append({
+            "tier": tier,
+            "total": len(tier_puzzles),
+            "solved": len(tier_best),
+            "avg_gens": round(sum(gens) / len(gens), 1) if gens else None,
+            "record": (min(tier_best, key=lambda e: e["generations"])
+                       if tier_best else None),
+        })
+    records = sorted(best.values(), key=lambda e: e["generations"])[:5]
+    clean = [{k: e[k] for k in ("puzzle", "sequence", "formula",
+                                "generations", "time_s", "size")}
+             for e in records]
+    return {"total": len(puzzles), "solved": len(best), "by_tier": by_tier,
+            "records": clean}
 
 
 @app.get("/api/history")

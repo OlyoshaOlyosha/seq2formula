@@ -751,18 +751,23 @@ function updateOpsHint() {
 
 function markPuzzle(p) {
   state.puzzle = p;
-  state.puzzleTerms = p.terms.map(Number);
+  state.puzzleTerms = p ? p.terms.map(Number) : null;
   const solvedNote = $("solvedNote");
-  if (p.reference) {
-    solvedNote.classList.add("show");
-    solvedNote.innerHTML = "";
-    const label = document.createElement("span");
-    label.textContent = "Эталон: ";
-    solvedNote.appendChild(label);
-    const ref = document.createElement("span");
-    renderKatex(ref, refToLatex(p.reference), false);
-    solvedNote.appendChild(ref);
+  if (!p || !p.reference) {
+    if (!p) {
+      solvedNote.classList.remove("show");
+      solvedNote.innerHTML = "";
+    }
+    return;
   }
+  solvedNote.classList.add("show");
+  solvedNote.innerHTML = "";
+  const label = document.createElement("span");
+  label.textContent = "Эталон: ";
+  solvedNote.appendChild(label);
+  const ref = document.createElement("span");
+  renderKatex(ref, refToLatex(p.reference), false);
+  solvedNote.appendChild(ref);
 }
 
 async function loadHistory() {
@@ -857,6 +862,49 @@ function refreshAll() {
   loadHistory().catch(() => {});
   loadHall().catch(() => {});
   loadCuriosities().catch(() => {});
+  loadStats().catch(() => {});
+}
+
+/* Library summary: solved fraction, per-tier aggregates, records. */
+const TIER_LABELS = { 1: "T1", 2: "T2", 3: "T3", 4: "T4", 5: "T5" };
+
+async function loadStats() {
+  const data = await api("/api/stats");
+  const headline = $("statsHeadline");
+  const tiers = $("statsTiers");
+  const records = $("statsRecords");
+  headline.textContent = `Решено ${data.solved} из ${data.total} загадок`;
+  tiers.innerHTML = "";
+  for (const t of data.by_tier) {
+    const cell = document.createElement("div");
+    cell.className = "stats-tier" + (t.solved === t.total ? " done" : "");
+    cell.dataset.tip = t.solved === t.total
+      ? "Все загадки уровня решены"
+      : `Решено ${t.solved} из ${t.total} загадок этого уровня`;
+    const name = document.createElement("span");
+    name.className = "stats-tier-name";
+    name.textContent = TIER_LABELS[t.tier] || `T${t.tier}`;
+    const frac = document.createElement("span");
+    frac.className = "num";
+    frac.textContent = `${t.solved}/${t.total}`;
+    const gens = document.createElement("span");
+    gens.className = "stats-tier-gens";
+    gens.textContent = t.avg_gens !== null ? `⌀ ${t.avg_gens} пок.` : "—";
+    cell.append(name, frac, gens);
+    tiers.appendChild(cell);
+  }
+  records.innerHTML = "";
+  for (const r of data.records) {
+    const row = document.createElement("div");
+    row.className = "stats-record";
+    const who = document.createElement("span");
+    who.textContent = r.puzzle || "своя последовательность";
+    const val = document.createElement("span");
+    val.className = "num";
+    val.textContent = `${r.generations} пок. · ${fmtTime(r.time_s)}`;
+    row.append(who, val);
+    records.appendChild(row);
+  }
 }
 
 /* ---------- controls ---------- */
@@ -1013,10 +1061,14 @@ function flashSettingsMeta(text) {
 
 function bindControls() {
   $("runForm").addEventListener("submit", startRun);
-  $("seqInput").addEventListener("input", () => { $("puzzleSelect").value = ""; });
+  $("seqInput").addEventListener("input", () => {
+    $("puzzleSelect").value = "";
+    markPuzzle(null);
+  });
   $("puzzleSelect").addEventListener("change", (e) => {
     const p = PUZZLE_CACHE.find((x) => x.id === e.target.value);
     if (p) $("seqInput").value = p.terms.join(" ");
+    markPuzzle(p || null);
     updateOpsHint();
   });
   $("pauseBtn").addEventListener("click", () => {

@@ -6,7 +6,7 @@
 <title>seq2formula — поиск формулы</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=11">
 </head>
 <body>
 <header class="topbar">
@@ -197,6 +197,14 @@
         <h2 class="panel-title">Результаты</h2>
         <span class="panel-meta" id="resultsMeta"></span>
       </div>
+      <div class="stats-card" id="statsCard" aria-label="Сводка по библиотеке">
+        <div class="stats-top">
+          <span class="stats-headline" id="statsHeadline">—</span>
+          <span class="panel-meta">решено / рекорды по тирам</span>
+        </div>
+        <div class="stats-tiers" id="statsTiers"></div>
+        <div class="stats-records" id="statsRecords"></div>
+      </div>
       <div class="tabs" role="tablist" aria-label="Результаты">
         <button class="tab" role="tab" id="tabHistory" aria-selected="true">История</button>
         <button class="tab" role="tab" id="tabHall" aria-selected="false">Зал славы</button>
@@ -296,6 +304,6 @@
 
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -615,6 +615,76 @@ input[type="range"] {
 
 .race-log-item.log-shock { color: var(--amber); }
 
+/* Library summary (Результаты) */
+
+.stats-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.stats-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+.stats-headline { font-weight: 600; }
+
+.stats-tiers { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.stats-tier {
+  position: relative;
+  cursor: help;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font-size: var(--fs-small);
+}
+
+.stats-tier.done { border-color: var(--positive); color: var(--positive); }
+
+.stats-tier-name { color: var(--muted); font-weight: 600; }
+
+.stats-tier.done .stats-tier-name { color: inherit; }
+
+.stats-tier-gens { color: var(--faint); font-size: var(--fs-small); }
+
+.stats-tier::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  background: var(--raised);
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.stats-tier:hover::after { opacity: 1; }
+
+.stats-records { display: grid; gap: 4px; }
+
+.stats-record {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.stats-record .num { color: var(--fg); }
+
 /* uPlot theming */
 .uplot, .uplot *, .uplot *::before, .uplot *::after { box-sizing: border-box; }
 .uplot .title, .uplot .caption { display: none; }
