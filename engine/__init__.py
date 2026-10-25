@@ -3,8 +3,7 @@
 from .evaluator import evaluate, evaluate_all
 from .fitness import EPS, Score, score_candidate, term_error
 from .gp import GPConfig, GPEngine
-from .nodes import (BinOp, Const, Neg, Node, UnOp, UNARY_FUNCS, Var, depth,
-                    from_dict, size, to_dict, to_text)
+from .nodes import UNARY_FUNCS, BinOp, Const, Neg, Node, UnOp, Var, depth, from_dict, size, to_dict, to_text
 
 __all__ = [
     "evaluate", "evaluate_all",
