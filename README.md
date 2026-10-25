@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-80%20passed-3FC07A)
+![Tests](https://img.shields.io/badge/tests-91%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 seq2formula is a local experiment in symbolic regression: given a finite
@@ -73,15 +73,17 @@ Experimental, in continuous development.
   library of graded difficulty.
 - Grammar v2 (done) — unary functions (roots, factorial, trigonometry,
   logarithm), the remainder operator, and the π / e constants, with the
-  picker regrouped into basic and advanced sets; puzzle tier T4 showcases
-  the new operations.
+  picker regrouped into basic and advanced sets; puzzle tiers T4/T5
+  showcase the new operations (41 puzzles in total).
+- Performance and search quality (done) — compiled-formula evaluation
+  (~3× faster generations), anti-stagnation shocks when the search
+  stalls, and a settings sweep over the whole library; the live feed
+  renders formulas with math typography, and any formula can be plotted
+  next to its sequence.
 - Stage 2 (next) — reinforcement-learning engine that assembles formulas
   step by step and is trained live, per puzzle; trained policies are
   saved, reused and compared.
-- Later — formula plots (see what a formula looks like next to its
-  sequence), a settings tab for the engine knobs, recurrences (the
-  operator picker will cover the new operations too), more statistics,
-  experiments with engine parameters.
+- Later — recurrences, more statistics, more tuning experiments.
 
 ## Notes
 
