@@ -2,11 +2,18 @@
 
 **English** · [Русский](README.ru.md)
 
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-80%20passed-3FC07A)
+![Local](https://img.shields.io/badge/network-none-8B93F8)
+
 seq2formula is a local experiment in symbolic regression: given a finite
 sequence of numbers, the system searches for a closed-form expression f(n)
 that generates it — `1 2 4 8 16` → `2^n`. The search currently runs as a
 genetic programming loop, with a reinforcement-learning engine planned on
 the same base; every generation is streamed live to a browser dashboard.
+
+![seq2formula dashboard](docs/img/dashboard-search.png)
 
 The project is a long-running personal experiment rather than a finished
 product: the grammar, the engines and the dashboard are expected to evolve

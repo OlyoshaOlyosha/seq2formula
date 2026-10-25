@@ -2,12 +2,19 @@
 
 [English](README.md) · **Русский**
 
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-80%20passed-3FC07A)
+![Local](https://img.shields.io/badge/network-none-8B93F8)
+
 seq2formula — локальный эксперимент в области символьной регрессии: по
 конечной числовой последовательности система ищет замкнутую формулу f(n),
 которая её порождает: «1 2 4 8 16» → `2^n`. Поиск устроен как эволюционный
 цикл (генетическое программирование), позже на ту же базу встанет движок
 с обучением с подкреплением; каждое поколение транслируется на дашборд в
 браузере в реальном времени.
+
+![Дашборд seq2formula](docs/img/dashboard-search.png)
 
 Проект — длительный личный эксперимент, а не законченный продукт:
 грамматика, движки и дашборд планируют развиваться итеративно, а
