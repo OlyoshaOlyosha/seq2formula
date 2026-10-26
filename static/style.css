@@ -39,6 +39,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 html { color-scheme: dark; }
 
 body {
@@ -256,7 +258,7 @@ select.input option {
   bottom: calc(100% + 6px);
   left: 8px;
   right: 8px;
-  z-index: 20;
+  z-index: 50; /* must be higher than charts below */
   background: var(--raised);
   border: 1px solid var(--control);
   border-radius: var(--radius-control);
@@ -528,7 +530,8 @@ input[type="range"] {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
-  overflow: hidden;
+  /* overflow: hidden was clipping the tooltips; use border-radius on
+     the children instead to keep the corners rounded. */
 }
 
 .kpi {
@@ -538,6 +541,10 @@ input[type="range"] {
   border-left: 1px solid var(--rule);
   min-width: 0;
 }
+
+/* Keep the outer corners rounded without clipping the tooltips */
+.kpi:first-child { border-top-left-radius: var(--radius-card); border-bottom-left-radius: var(--radius-card); }
+.kpi:last-child { border-top-right-radius: var(--radius-card); border-bottom-right-radius: var(--radius-card); }
 
 .kpi:first-child { border-left: none; }
 
@@ -611,7 +618,7 @@ input[type="range"] {
 
 .race-formula .katex { font-size: 1em; }
 
-.race-meta { flex: none; font-size: var(--fs-small); color: var(--muted); }
+.race-meta { flex: none; font-size: var(--fs-small); color: var(--muted); cursor: help; }
 
 .race-log-head { margin-top: 10px; }
 
@@ -630,6 +637,7 @@ input[type="range"] {
   font-size: var(--fs-small);
   color: var(--muted);
   border-bottom: 1px solid var(--rule);
+  word-break: break-word;
 }
 
 .race-log-item:last-child { border-bottom: none; }
