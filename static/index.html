@@ -6,7 +6,7 @@
 <title>seq2formula — поиск формулы</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=16">
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="topbar">
@@ -46,6 +46,13 @@
           </select>
           <span class="field-hint">41 загадка, пять уровней сложности</span>
         </label>
+        <label class="field field-ref">
+          <span class="field-label">Эталонная формула (необязательно)</span>
+          <input id="refInput" class="input" type="text"
+                 placeholder="например: 2^n или (n+1)/2" autocomplete="off"
+                 aria-describedby="refHint">
+          <span class="field-hint" id="refHint">своя формула-эталон — покажем её во время поиска для сравнения</span>
+        </label>
       </form>
       <div class="run-controls" id="runControls">
         <div class="control-group" role="group" aria-label="Управление поиском">
@@ -78,7 +85,7 @@
       </div>
       <div class="ops-row" id="opsRow" role="group" aria-label="Операции, доступные эволюции">
         <span class="ops-label">Операции формул
-          <span class="ops-hint">включай и выключай — применяются к следующему запуску</span>
+          <span class="ops-hint">изменения применяются к следующему запуску</span>
         </span>
         <div class="ops-groups">
           <div class="ops-group">
@@ -123,14 +130,17 @@
       </div>
       <div class="solved-note" id="solvedNote"></div>
       <div class="live-empty" id="liveEmpty">
-        Введите последовательность или выберите загадку и запустите поиск.
+        Здесь появится поиск после ввода последовательности или выбора загадки.
       </div>
       <div class="live-grid" id="liveGrid" hidden>
         <div class="formula-hero">
           <div class="hero-main">
             <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span></div>
-            <div class="hero-formula" id="bestFormula" aria-live="polite"></div>
+            <div class="hero-formula" id="bestFormula" aria-live="polite"
+                 role="button" tabindex="0"
+                 title="Копировать формулу"></div>
             <div class="hero-sub num" id="bestSub"></div>
+            <span class="copy-badge" id="copyBadge" hidden>скопировано</span>
           </div>
           <div class="hero-chart" id="heroChart"
                title="Формула (линия) против последовательности (точки)"></div>
@@ -140,7 +150,7 @@
             <span class="kpi-label">Поколение</span><span class="kpi-value num" id="kpiGen">—</span></div>
           <div class="kpi" data-tip="Насколько лучшая формула промахивается в среднем по всем членам; 0% — точное совпадение по значениям">
             <span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="kpiError">—</span></div>
-          <div class="kpi" data-tip="Число узлов в дереве формулы (n, 2, +, ^ и т.д.); короче = проще, по нему выбирают чемпиона зала славы">
+          <div class="kpi" data-tip="Размер формулы: число элементов в ней (числа, операторы, переменные). Чем меньше, тем проще формула. По нему выбирают чемпиона зала славы.">
             <span class="kpi-label">Размер формулы</span><span class="kpi-value num" id="kpiSize">—</span></div>
           <div class="kpi" data-tip="Доля уникальных формул (и их абсолютное число); 100% — все разные, 0% — выродились в копии">
             <span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
@@ -214,20 +224,23 @@
         <div class="stats-records" id="statsRecords"></div>
       </div>
       <div class="tabs" role="tablist" aria-label="Результаты">
-        <button class="tab" role="tab" id="tabHistory" aria-selected="true">История</button>
-        <button class="tab" role="tab" id="tabHall" aria-selected="false">Зал славы</button>
+        <button class="tab" role="tab" id="tabLibrary" aria-selected="true">Библиотека</button>
+        <button class="tab" role="tab" id="tabMySeqs" aria-selected="false">Мои последовательности</button>
         <button class="tab" role="tab" id="tabCurio" aria-selected="false">Курьёзы</button>
       </div>
       <div class="tab-body" id="tabBody">
-        <table class="list-table" id="historyTable">
-          <thead><tr><th>Когда</th><th>Последовательность</th><th>Формула</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
-          <tbody id="historyRows"></tbody>
+        <table class="list-table" id="libraryTable">
+          <thead><tr><th>Загадка</th><th>Эталон</th><th>Лучший результат</th><th class="num">Поколений</th></tr></thead>
+          <tbody id="libraryRows"></tbody>
         </table>
-        <table class="list-table" id="hallTable" hidden>
-          <thead><tr><th>Последовательность</th><th>Самая короткая формула</th><th class="num">Размер</th></tr></thead>
-          <tbody id="hallRows"></tbody>
+        <table class="list-table" id="mySeqTable" hidden>
+          <thead><tr><th>Последовательность</th><th>Мой эталон</th><th>Лучший результат</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
+          <tbody id="mySeqRows"></tbody>
         </table>
-        <div id="curioList" hidden></div>
+        <table class="list-table" id="curioTable" hidden>
+          <thead><tr><th>Последовательность</th><th>Формула</th><th class="num">Размер</th><th class="num">Ошибка</th><th class="num">Поколение</th></tr></thead>
+          <tbody id="curioRows"></tbody>
+        </table>
       </div>
     </section>
   </section>

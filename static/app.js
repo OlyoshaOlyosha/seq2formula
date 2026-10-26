@@ -27,6 +27,7 @@ const state = {
   lastTopUpdate: 0,        // throttle the top-10 list (100 gen/s is unreadable)
   lastLogGen: null,        // throttle the event feed
   wasShocking: false,      // dedupe shock entries in the race log
+  pendingPuzzleRestore: "", // remembered puzzle id, applied once the library loads
 };
 
 /* ---------- formatting ---------- */
@@ -148,9 +149,24 @@ function astToLatex(ast) {
 
 /* Plain reference text ("2^n", "(2n-1)^2") -> LaTeX, best effort. */
 function refToLatex(text) {
-  return text
+  let latex = text
     .replace(/\^(-?\d+|[a-z])/g, "^{$1}")
-    .replace(/\//g, "/");
+    // Convert written functions into proper math symbols
+    .replace(/sqrt\(([^)]+)\)/g, "\\sqrt{$1}")
+    .replace(/cbrt\(([^)]+)\)/g, "\\sqrt[3]{$1}")
+    .replace(/√\(([^)]+)\)/g, "\\sqrt{$1}")
+    .replace(/√([a-zA-Z0-9]+)/g, "\\sqrt{$1}")
+    .replace(/sin/g, "\\sin")
+    .replace(/cos/g, "\\cos")
+    .replace(/tan/g, "\\tan")
+    .replace(/ln/g, "\\ln");
+
+  // Convert a simple "A / B" into a fraction for pretty display
+  const parts = latex.split("/");
+  if (parts.length === 2) {
+    return `\\frac{${parts[0].trim()}}{${parts[1].trim()}}`;
+  }
+  return latex;
 }
 
 function renderKatex(el, latex, displayMode) {
@@ -241,7 +257,7 @@ function makeCharts() {
           points: { show: false }, paths: barsPath, fill: "rgba(139,147,248,0.18)" },
       ], false),
       scales: { x: { time: false } },
-      axes: [{ ...axisX, label: "размер формулы (узлов)" }, { ...axisOpts(), label: "кол-во формул" }] },
+      axes: [{ ...axisX, label: "размер формулы" }, { ...axisOpts(), label: "кол-во формул" }] },
     [[], []], $("chartSizes"));
 
   // hero mini-chart: the formula (line) against the target sequence (dots)
@@ -527,7 +543,7 @@ function renderTop(top) {
     
     const meta = document.createElement("span");
     meta.className = "race-meta num";
-    meta.textContent = `fit ${fmtNum(item.fitness)} · узлов ${item.size}`;
+    meta.textContent = `fit ${fmtNum(item.fitness)} · размер ${item.size}`;
     meta.title = "Fitness = 1 - ошибка - штраф_за_размер. Ближе к 1.0 — лучше.";
     li.appendChild(meta);
     list.appendChild(li);
@@ -588,7 +604,7 @@ function updateRaceLog(msg) {
     pushLogEntry({ pre: "точное совпадение найдено", cls: "log-solved" });
   } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
     pushLogEntry({
-      pre: "усадка: формула короче —", text: `${msg.best.size} узлов`,
+      pre: "усадка: формула короче —", text: `размер ${msg.best.size}`,
       cls: "log-shrink",
     });
   }
@@ -667,6 +683,7 @@ function applySolved(msg) {
   if (msg.formula) {
     renderKatex($("bestFormula"), astToLatex(msg.formula), true);
   }
+  if (msg.formula_text) state.lastFormulaText = msg.formula_text;
   const parts = [`Решено за ${msg.generations} поколений`];
   if (msg.time_s !== null) parts.push(fmtTime(msg.time_s));
   const note = $("solvedNote");
@@ -775,6 +792,17 @@ async function loadPuzzles() {
     select.appendChild(group);
   }
   select.value = keep;
+  // First page load only: apply the remembered puzzle from a previous
+  // session. Later calls preserve the current choice through `keep`.
+  if (state.pendingPuzzleRestore && !select.value) {
+    const p = PUZZLE_CACHE.find((x) => x.id === state.pendingPuzzleRestore);
+    if (p) {
+      select.value = state.pendingPuzzleRestore;
+      $("seqInput").value = p.terms.join(" ");
+      markPuzzle(p);
+    }
+    state.pendingPuzzleRestore = "";
+  }
   updateOpsHint();
 }
 
@@ -795,104 +823,236 @@ function updateOpsHint() {
     el.hidden = true;
     return;
   }
-  el.textContent = `загадке «${p.name}» нужны: ` +
+  el.textContent = `для загадки «${p.name}» требуются: ` +
     missing.map((t) => TOKEN_LABELS[t] || t).join(", ") +
-    " — включи их в операциях";
+    " (сейчас отключены)";
   el.hidden = false;
+}
+
+function calcWeightedSize(text) {
+  // Insert explicit '*' for implicit multiplication (e.g. 2n -> 2 * n)
+  const formatted = text.toLowerCase()
+    .replace(/√/g, " sqrt ").replace(/∛/g, " cbrt ")
+    .replace(/π/g, " pi ").replace(/!/g, " ! ")
+    .replace(/(\d)([a-z(])/g, "$1 * $2")
+    .replace(/(\))([a-z0-9(])/g, "$1 * $2");
+
+  const tokens = formatted.match(/(sqrt|cbrt|fact|abs|sin|cos|tan|ln|pi|e|\d+(\.\d+)?|n|[-+*/^%()!])/g) || [];
+  
+  let size = 0;
+  for (const t of tokens) {
+    if (t === "(" || t === ")") continue;
+    if (["sqrt", "cbrt", "fact", "abs", "sin", "cos", "tan", "ln", "!", "%", "mod"].includes(t)) {
+      size += 2;
+    } else if (["+", "-", "*", "/", "^"].includes(t)) {
+      size += 1;
+    } else if (["n", "pi", "e"].includes(t)) {
+      size += 1;
+    } else if (/^\d+(\.\d+)?$/.test(t)) {
+      // 1000 -> 4, 10 -> 2, 0.5 -> 1 (primitives stay 1)
+      const num = parseFloat(t);
+      if (num < 1) size += 1;
+      else size += String(Math.floor(Math.abs(num))).length;
+    }
+  }
+  return size;
+}
+
+function renderReferenceNote(text) {
+  const note = $("solvedNote");
+  note.classList.add("show");
+  note.innerHTML = "";
+  const label = document.createElement("span");
+  label.textContent = "Эталон: ";
+  note.appendChild(label);
+  const ref = document.createElement("span");
+  renderKatex(ref, refToLatex(text), false);
+  note.appendChild(ref);
+  
+  const size = calcWeightedSize(text);
+  const meta = document.createElement("span");
+  meta.style.marginLeft = "12px";
+  meta.style.color = "var(--muted)";
+  meta.style.fontSize = "12px";
+  meta.title = "Точный размер формулы (с учётом сложности знаков и разрядности чисел).";
+  meta.textContent = `(размер ${size})`;
+  note.appendChild(meta);
+}
+
+function clearReferenceNote() {
+  const note = $("solvedNote");
+  note.classList.remove("show");
+  note.innerHTML = "";
 }
 
 function markPuzzle(p) {
   state.puzzle = p;
   state.puzzleTerms = p ? p.terms.map(Number) : null;
-  const solvedNote = $("solvedNote");
-  if (!p || !p.reference) {
-    if (!p) {
-      solvedNote.classList.remove("show");
-      solvedNote.innerHTML = "";
-    }
-    return;
-  }
-  solvedNote.classList.add("show");
-  solvedNote.innerHTML = "";
-  const label = document.createElement("span");
-  label.textContent = "Эталон: ";
-  solvedNote.appendChild(label);
-  const ref = document.createElement("span");
-  renderKatex(ref, refToLatex(p.reference), false);
-  solvedNote.appendChild(ref);
-  
-  // Calculate the reference size (rough estimate by counting tokens)
-  const refSize = p.reference.split(/[\+\-\*\/\^\(\)\s]+/).filter(Boolean).length;
-  const meta = document.createElement("span");
-  meta.style.marginLeft = "12px";
-  meta.style.color = "var(--muted)";
-  meta.style.fontSize = "12px";
-  meta.textContent = `(≈ ${refSize} узлов)`;
-  solvedNote.appendChild(meta);
+  if (!p) { clearReferenceNote(); return; }
+  if (p.reference) renderReferenceNote(p.reference);
 }
 
-async function loadHistory() {
+async function loadLibrary() {
   const data = await api("/api/history");
-  const rows = $("historyRows");
+  const puzzles = await api("/api/puzzles");
+  const history = data.history;
+  const rows = $("libraryRows");
   rows.innerHTML = "";
-  if (!data.history.length) {
+
+  // Group best attempts by sequence
+  const best = {};
+  for (const h of history) {
+    const key = h.sequence.join(",");
+    if (!best[key] || h.solved || (!best[key].solved && h.size < best[key].size)) {
+      best[key] = h;
+    }
+  }
+
+  for (const p of puzzles.puzzles) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable-row";
+    tr.title = "Запустить поиск этой загадки";
+    tr.addEventListener("click", () => {
+      $("puzzleSelect").value = p.id;
+      $("seqInput").value = p.terms.join(" ");
+      $("refInput").value = "";
+      markPuzzle(p);
+      updateOpsHint();
+      $("ptabSearch").click();
+    });
+
+    const key = p.terms.join(",");
+    const h = best[key];
+
+    const title = document.createElement("td");
+    title.innerHTML = `<b>${p.name}</b><br><span style="color:var(--faint);font-size:12px">${p.terms.join(" ")}</span>`;
+    tr.appendChild(title);
+
+    const ref = document.createElement("td");
+    renderKatex(ref, refToLatex(p.reference || "—"), false);
+    tr.appendChild(ref);
+
+    const result = document.createElement("td");
+    if (h) {
+      if (h.formula_ast) renderKatex(result, astToLatex(h.formula_ast), false);
+      else result.textContent = h.formula;
+      result.className = h.solved ? "solved-text" : "amber-text";
+      
+      const refSize = calcWeightedSize(p.reference || "");
+      if (h.solved && h.size < refSize) {
+        tr.classList.add("better-than-ref");
+        result.title = `Найдена формула короче эталона! (Размер ${h.size} против ${refSize})`;
+      }
+      
+      bindPlotHover(tr, () => [h.sequence, h.values]);
+    } else {
+      result.textContent = "—";
+      result.style.color = "var(--faint)";
+    }
+    tr.appendChild(result);
+
+    const gens = document.createElement("td");
+    gens.className = "num";
+    if (h) {
+      let gensText = String(h.generations);
+      // Find previous attempt for delta
+      const attempts = history.filter(x => x.sequence.join(",") === key && x.ts !== h.ts);
+      if (attempts.length) {
+        const prev = attempts[0]; // history is newest first
+        const delta = h.generations - prev.generations;
+        if (delta < 0) gensText += `<span class="delta-neg">(${delta})</span>`;
+        else if (delta > 0) gensText += `<span class="delta-pos">(+${delta})</span>`;
+      }
+      gens.innerHTML = gensText;
+    } else {
+      gens.textContent = "—";
+    }
+    tr.appendChild(gens);
+
+    rows.appendChild(tr);
+  }
+}
+
+async function loadMySeqs() {
+  const data = await api("/api/history");
+  const rows = $("mySeqRows");
+  rows.innerHTML = "";
+
+  // Keep only custom sequences, group by sequence
+  const custom = data.history.filter(h => !h.puzzle);
+  const best = {};
+  for (const h of custom) {
+    const key = h.sequence.join(",");
+    if (!best[key] || h.solved || (!best[key].solved && h.size < best[key].size)) {
+      best[key] = h;
+    }
+  }
+
+  const unique = Object.values(best);
+  if (!unique.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = 5;
     td.className = "list-empty";
-    td.textContent = "Пока ничего не решено — запустите первый поиск.";
+    td.textContent = "Пользовательские последовательности пока отсутствуют.";
     tr.appendChild(td);
     rows.appendChild(tr);
     return;
   }
-  for (const h of data.history) {
-    const tr = document.createElement("tr");
-    if (h.settings) {
-      const s = h.settings;
-      tr.title = `настройки прогона: популяция ${s.population}, `
-        + `мутация ${s.p_mutate}, кроссовер ${s.p_crossover}, `
-        + `штраф ${s.parsimony}, элита ${s.elitism}, `
-        + `турнир ${s.tournament}, скорость ${s.speed}`;
-    }
-    addCell(tr, "td", fmtWhen(h.ts), "when");
-    addCell(tr, "td", h.puzzle ? `«${h.puzzle}» ${h.sequence.map(fmtNum).join(" ")}` : h.sequence.map(fmtNum).join(" "), "seq");
-    const f = addCell(tr, "td", "");
-    if (h.formula_ast) renderKatex(f, astToLatex(h.formula_ast), false);
-    else f.textContent = h.formula;
-    const gensCell = addCell(tr, "td", String(h.generations), "num");
-    const timeCell = addCell(tr, "td", fmtTime(h.time_s), "num");
-    if (!h.solved) {
-      f.style.color = "var(--amber)";
-      gensCell.style.color = "var(--amber)";
-      timeCell.style.color = "var(--amber)";
-      tr.title = "Лучший результат (не решено)";
-    }
-    bindPlotHover(tr, () => [h.sequence, h.values]);
-    rows.appendChild(tr);
-  }
-}
 
-async function loadHall() {
-  const data = await api("/api/hall");
-  const rows = $("hallRows");
-  rows.innerHTML = "";
-  if (!data.hall.length) {
+  // Sort by timestamp descending
+  unique.sort((a, b) => b.ts.localeCompare(a.ts));
+
+  for (const h of unique) {
     const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 3;
-    td.className = "list-empty";
-    td.textContent = "Зал пуст, пока не решена ни одна последовательность.";
-    tr.appendChild(td);
-    rows.appendChild(tr);
-    return;
-  }
-  for (const h of data.hall) {
-    const tr = document.createElement("tr");
-    addCell(tr, "td", h.sequence.map(fmtNum).join(" "), "seq");
-    const f = addCell(tr, "td", "");
-    if (h.formula_ast) renderKatex(f, astToLatex(h.formula_ast), false);
-    else f.textContent = h.formula;
-    addCell(tr, "td", String(h.size), "num");
+    tr.className = "clickable-row";
+    tr.title = "Запустить поиск заново";
+    tr.addEventListener("click", () => {
+      $("seqInput").value = h.sequence.join(" ");
+      $("refInput").value = h.reference || "";
+      $("puzzleSelect").value = "";
+      markPuzzle(null);
+      updateOpsHint();
+      $("ptabSearch").click();
+    });
+
+    const seq = document.createElement("td");
+    seq.className = "seq";
+    seq.textContent = h.sequence.map(fmtNum).join(" ");
+    tr.appendChild(seq);
+
+    const ref = document.createElement("td");
+    if (h.reference) renderKatex(ref, refToLatex(h.reference), false);
+    else { ref.textContent = "—"; ref.style.color = "var(--faint)"; }
+    tr.appendChild(ref);
+
+    const result = document.createElement("td");
+    if (h.formula_ast) renderKatex(result, astToLatex(h.formula_ast), false);
+    else result.textContent = h.formula;
+    result.className = h.solved ? "solved-text" : "amber-text";
+    tr.appendChild(result);
+
+    const err = document.createElement("td");
+    err.className = "num";
+    if (h.solved) err.textContent = "0%";
+    else err.textContent = fmtPercent(h.error);
+    err.className = h.solved ? "num solved-text" : "num amber-text";
+    tr.appendChild(err);
+
+    const gens = document.createElement("td");
+    gens.className = "num";
+    let gensText = String(h.generations);
+    // Find previous attempt for delta
+    const attempts = custom.filter(x => x.sequence.join(",") === h.sequence.join(",") && x.ts !== h.ts);
+    if (attempts.length) {
+      const prev = attempts[0]; // history is newest first
+      const delta = h.generations - prev.generations;
+      if (delta < 0) gensText += `<span class="delta-neg">(${delta})</span>`;
+      else if (delta > 0) gensText += `<span class="delta-pos">(+${delta})</span>`;
+    }
+    gens.innerHTML = gensText;
+    tr.appendChild(gens);
+
     bindPlotHover(tr, () => [h.sequence, h.values]);
     rows.appendChild(tr);
   }
@@ -900,41 +1060,46 @@ async function loadHall() {
 
 async function loadCuriosities() {
   const data = await api("/api/curiosities");
-  const list = $("curioList");
-  list.innerHTML = "";
+  const rows = $("curioRows");
+  rows.innerHTML = "";
   if (!data.curiosities.length) {
-    const empty = document.createElement("p");
-    empty.className = "list-empty";
-    empty.textContent = "Курьёзов пока нет: почти-правильные монстры появятся после первых прогонов.";
-    list.appendChild(empty);
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "list-empty";
+    td.textContent = "Курьёзов пока нет: почти-правильные монстры появятся после первых прогонов.";
+    tr.appendChild(td);
+    rows.appendChild(tr);
     return;
   }
   for (const c of data.curiosities) {
-    const item = document.createElement("div");
-    item.className = "curio-item";
-    const f = document.createElement("div");
-    f.className = "curio-formula";
-    renderKatex(f, astToLatex(c.formula_ast), false);
-    item.appendChild(f);
-    const meta = document.createElement("div");
-    meta.className = "curio-meta";
-    const seqText = Array.isArray(c.sequence) && c.sequence.length
-      ? `<span>для <b>${c.sequence.map(fmtNum).join(" ")}</b></span>` : "";
-    meta.innerHTML =
-      seqText +
-      `<span>размер <b>${c.size}</b></span>` +
-      `<span>ошибка <b>${fmtPercent(c.error)}</b></span>` +
-      `<span>поколение <b>${c.gen + 1}</b></span>`;
-    item.appendChild(meta);
-    bindPlotHover(item, () => [c.sequence, c.values]);
-    list.appendChild(item);
+    const tr = document.createElement("tr");
+    tr.className = "clickable-row";
+    tr.title = "Запустить поиск этой последовательности";
+    tr.addEventListener("click", () => {
+      $("seqInput").value = c.sequence.join(" ");
+      $("refInput").value = "";
+      $("puzzleSelect").value = "";
+      markPuzzle(null);
+      updateOpsHint();
+      $("ptabSearch").click();
+    });
+    addCell(tr, "td", c.sequence.map(fmtNum).join(" "), "seq");
+    const f = addCell(tr, "td", "");
+    if (c.formula_ast) renderKatex(f, astToLatex(c.formula_ast), false);
+    else f.textContent = c.formula_text;
+    addCell(tr, "td", String(c.size), "num");
+    addCell(tr, "td", fmtPercent(c.error), "num");
+    addCell(tr, "td", String(c.gen + 1), "num");
+    bindPlotHover(tr, () => [c.sequence, c.values]);
+    rows.appendChild(tr);
   }
 }
 
 function refreshAll() {
   loadPuzzles().catch(() => {});
-  loadHistory().catch(() => {});
-  loadHall().catch(() => {});
+  loadLibrary().catch(() => {});
+  loadMySeqs().catch(() => {});
   loadCuriosities().catch(() => {});
   loadStats().catch(() => {});
 }
@@ -987,10 +1152,10 @@ async function loadStats() {
 
 function parseTerms(text) {
   const parts = text.split(/[\s,;]+/).filter(Boolean);
-  if (!parts.length) throw new Error("введите последовательность");
+  if (!parts.length) throw new Error("последовательность не заполнена");
   const terms = parts.map(Number);
-  if (terms.some((t) => !isFinite(t))) throw new Error("не все значения — числа");
-  if (terms.length < 2 || terms.length > 32) throw new Error("нужно от 2 до 32 членов");
+  if (terms.some((t) => !isFinite(t))) throw new Error("не все значения являются числами");
+  if (terms.length < 2 || terms.length > 32) throw new Error("допустимая длина последовательности — от 2 до 32 членов");
   return terms;
 }
 
@@ -1000,7 +1165,7 @@ async function startRun(event) {
   state.lastRunSolved = false;
   
   if (state.ops.size === 0) {
-    alertErr("выберите хотя бы одну операцию");
+    alertErr("не выбрана ни одна операция");
     return;
   }
   
@@ -1013,7 +1178,8 @@ async function startRun(event) {
     let terms;
     try { terms = parseTerms($("seqInput").value); }
     catch (e) { alertErr(e.message); return; }
-    body = { terms, speed: Number($("speedRange").value), ops: [...state.ops] };
+    const customRef = $("refInput").value.trim();
+    body = { terms, speed: Number($("speedRange").value), ops: [...state.ops], reference: customRef || null };
   }
   try {
     const status = await api("/api/run", body);
@@ -1023,10 +1189,11 @@ async function startRun(event) {
     state.puzzleTerms = status.sequence;
     if (status.puzzle) {
       const p = PUZZLE_CACHE.find((x) => x.id === status.puzzle.id);
-      if (p && !p.reference) markPuzzle({ ...p, reference: null });
-      else if (p) markPuzzle(p);
+      if (p) markPuzzle(p);
     } else {
-      $("solvedNote").classList.remove("show");
+      const customRef = $("refInput").value.trim();
+      if (customRef) renderReferenceNote(customRef);
+      else clearReferenceNote();
     }
     $("termsEmpty").hidden = true;
     applyStatusMsg(status);
@@ -1052,9 +1219,31 @@ async function setSpeed(gps) {
   catch (e) { /* speed is best-effort */ }
 }
 
+async function copyBestFormula() {
+  const text = state.lastFormulaText;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    // Fallback for non-secure contexts (clipboard API unavailable)
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+  const badge = $("copyBadge");
+  badge.hidden = false;
+  clearTimeout(copyBestFormula.timer);
+  copyBestFormula.timer = setTimeout(() => { badge.hidden = true; }, 1200);
+}
+
 const RESULT_META = {
-  history: "последние решённые прогоны: формула, поколение, на котором найдена, и время поиска",
-  hall: "размер = число узлов в формуле; меньше — проще. Чемпион обновляется, когда эволюция найдёт короче",
+  library: "все загадки из библиотеки: эталон и лучший найденный результат (зелёный — решено, оранжевый — пока только приближение)",
+  myseqs: "введённые вами последовательности, лучшие найденные формулы и ошибки",
   curio: "почти правильные, но громоздкие монстры — следы блуждания эволюции",
 };
 
@@ -1126,7 +1315,7 @@ async function resetSettings() {
     state.settingDefaults = data.defaults;
     fillSettingsForm();
     applySpeedMax();
-    flashSettingsMeta("вернули значения по умолчанию");
+    flashSettingsMeta("настройки сброшены к значениям по умолчанию");
   } catch (e) {
     alertErr("не удалось сбросить настройки: " + e.message);
   }
@@ -1156,11 +1345,26 @@ function initFromUrlAndStorage() {
       }
     } catch (e) { /* ignore corrupted localStorage */ }
   }
-  
+
+  // Restore the last sequence / reference typed by the user, so a reload
+  // doesn't wipe them. URL params (below) still win: an explicit ?seq=
+  // link is a stronger intent than the last keystroke.
+  const savedSeq = localStorage.getItem("seq2formula_seq");
+  if (savedSeq) $("seqInput").value = savedSeq;
+  const savedRef = localStorage.getItem("seq2formula_ref");
+  if (savedRef) $("refInput").value = savedRef;
+
+  // Remembered puzzle selection is applied later: the select is empty
+  // until loadPuzzles() fills it. See loadPuzzles() for the restore.
+  state.pendingPuzzleRestore = localStorage.getItem("seq2formula_puzzle") || "";
+
   // Override with URL params if present
   const urlParams = new URLSearchParams(window.location.search);
   const seq = urlParams.get('seq');
-  if (seq) $("seqInput").value = seq;
+  if (seq) {
+    $("seqInput").value = seq;
+    state.pendingPuzzleRestore = ""; // explicit sequence wins over remembered puzzle
+  }
   
   const urlOps = urlParams.get('ops');
   if (urlOps) {
@@ -1189,11 +1393,23 @@ function bindControls() {
   $("runForm").addEventListener("submit", startRun);
   $("seqInput").addEventListener("input", () => {
     $("puzzleSelect").value = "";
+    localStorage.setItem("seq2formula_puzzle", "");
     markPuzzle(null);
+    localStorage.setItem("seq2formula_seq", $("seqInput").value);
+  });
+  $("refInput").addEventListener("input", () => {
+    localStorage.setItem("seq2formula_ref", $("refInput").value);
   });
   $("puzzleSelect").addEventListener("change", (e) => {
     const p = PUZZLE_CACHE.find((x) => x.id === e.target.value);
-    if (p) $("seqInput").value = p.terms.join(" ");
+    if (p) {
+      $("seqInput").value = p.terms.join(" ");
+      $("refInput").value = p.reference || "";  // populate the reference field
+      // keep the persisted state in sync with what's on screen now
+      localStorage.setItem("seq2formula_seq", $("seqInput").value);
+      localStorage.setItem("seq2formula_ref", $("refInput").value);
+    }
+    localStorage.setItem("seq2formula_puzzle", e.target.value);
     markPuzzle(p || null);
     updateOpsHint();
   });
@@ -1203,6 +1419,13 @@ function bindControls() {
   $("stepBtn").addEventListener("click", () => control("step"));
   $("stopBtn").addEventListener("click", () => control("stop"));
   $("continueBtn").addEventListener("click", () => control("continue"));
+  $("bestFormula").addEventListener("click", copyBestFormula);
+  $("bestFormula").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      copyBestFormula();
+    }
+  });
   let speedTimer = null;
   $("speedRange").addEventListener("input", (e) => {
     $("speedValue").textContent = e.target.value + " поколений/с";
@@ -1210,9 +1433,9 @@ function bindControls() {
     speedTimer = setTimeout(() => setSpeed(Number(e.target.value)), 200);
   });
 
-  const tabs = [["tabHistory", "historyTable", "history"],
-                ["tabHall", "hallTable", "hall"],
-                ["tabCurio", "curioList", "curio"]];
+  const tabs = [["tabLibrary", "libraryTable", "library"],
+                ["tabMySeqs", "mySeqTable", "myseqs"],
+                ["tabCurio", "curioTable", "curio"]];
   for (const [tabId, bodyId, metaKey] of tabs) {
     $(tabId).addEventListener("click", () => {
       for (const [t, b] of tabs) {
@@ -1222,7 +1445,7 @@ function bindControls() {
       $("resultsMeta").textContent = RESULT_META[metaKey];
     });
   }
-  $("resultsMeta").textContent = RESULT_META.history;
+  $("resultsMeta").textContent = RESULT_META.library;
 
   // top-level page tabs: Поиск / Результаты / Настройки
   const panes = [["ptabSearch", "paneSearch"], ["ptabResults", "paneResults"],

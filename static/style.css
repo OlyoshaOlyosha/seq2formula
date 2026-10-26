@@ -210,6 +210,9 @@ body {
   align-items: start;
 }
 
+/* own reference formula spans the full row under sequence/puzzle */
+.field-ref { grid-column: 1 / -1; }
+
 .field { display: grid; gap: 6px; min-width: 0; }
 
 .field-label { font-size: var(--fs-small); color: var(--muted); }
@@ -471,7 +474,7 @@ input[type="range"] {
   flex-wrap: wrap;
 }
 
-.hero-main { flex: 1; min-width: 0; }
+.hero-main { flex: 1; min-width: 0; position: relative; }
 
 .hero-chart {
   width: 300px;
@@ -511,13 +514,48 @@ input[type="range"] {
 
 .hero-formula {
   min-height: 56px;
-  display: flex;
-  align-items: center;
+  /* display: flex removed so KaTeX displayMode can layout fractions vertically */
   overflow-x: auto;
   padding: 6px 0;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 150ms;
 }
 
+.hero-formula .katex-display {
+  margin: 0;
+}
+
+/* Force KaTeX to align left, overriding its internal flexbox centering */
+.hero-formula .katex-display > .katex {
+  text-align: left !important;
+  display: block !important;
+}
+
+/* Force KaTeX to align left, overriding its internal flexbox centering */
+.hero-formula .katex-display > .katex {
+  text-align: left;
+  display: inline-block;
+}
+
+.hero-formula:hover { background: rgba(139, 147, 248, 0.08); }
+
 .hero-formula .katex { font-size: 1.9em; }
+
+/* "copied" confirmation pill: shown briefly after a successful copy */
+.copy-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--positive-dim);
+  color: var(--positive);
+  border: 1px solid var(--positive);
+  border-radius: var(--chip, 4px);
+  padding: 2px 8px;
+  font-size: var(--fs-small);
+  pointer-events: none;
+  z-index: 2;
+}
 
 .hero-sub { font-size: var(--fs-small); color: var(--muted); margin-top: 8px; }
 
@@ -806,13 +844,33 @@ input[type="range"] {
   vertical-align: middle;
 }
 
-.list-table td.num, .list-table th.num { text-align: right; padding-right: 0; }
+.list-table td.num, .list-table th.num { text-align: right; padding-left: 24px; padding-right: 0; }
 
 .list-table .seq { color: var(--muted); white-space: nowrap; }
 
 .list-table .when { color: var(--faint); white-space: nowrap; font-size: var(--fs-small); }
 
 .list-empty { color: var(--faint); padding: 16px 0; }
+
+.better-than-ref {
+  background-color: rgba(63, 192, 122, 0.05);
+}
+.better-than-ref td:first-child {
+  border-left: 3px solid var(--positive);
+  padding-left: 8px;
+}
+
+.solved-text { color: var(--positive); }
+.amber-text { color: var(--amber); }
+
+.clickable-row {
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+.clickable-row:hover { background-color: var(--raised); }
+
+.delta-neg { color: var(--positive); font-size: 12px; margin-left: 4px; }
+.delta-pos { color: var(--negative); font-size: 12px; margin-left: 4px; }
 
 /* curiosities */
 
@@ -852,7 +910,10 @@ input[type="range"] {
 
 .solved-note.show { display: flex; }
 
-.solved-note .katex { color: var(--text); }
+.solved-note .katex {
+  color: var(--text);
+  font-size: 1.6em; /* Make inline formulas in the banner readable */
+}
 
 /* ---------- footer ---------- */
 
