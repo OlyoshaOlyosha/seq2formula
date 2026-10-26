@@ -76,10 +76,10 @@ Experimental, in continuous development.
   picker regrouped into basic and advanced sets; puzzle tiers T4/T5
   showcase the new operations (41 puzzles in total).
 - Performance and search quality (done) — compiled-formula evaluation
-  (~3× faster generations), anti-stagnation shocks when the search
-  stalls, and a settings sweep over the whole library; the live feed
-  renders formulas with math typography, and any formula can be plotted
-  next to its sequence.
+  (~3× faster generations), diversity mechanics (fitness sharing,
+  adaptive anti-stagnation shocks, weighted parsimony), and a settings
+  sweep over the whole library; the live feed renders formulas with math
+  typography, and any formula can be plotted next to its sequence.
 - Stage 2 (next) — reinforcement-learning engine that assembles formulas
   step by step and is trained live, per puzzle; trained policies are
   saved, reused and compared.
