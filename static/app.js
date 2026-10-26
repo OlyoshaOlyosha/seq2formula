@@ -24,6 +24,9 @@ const state = {
   ops: new Set(["+", "-", "*", "/", "^"]),  // enabled binary operators
   settings: null,          // engine knobs from /api/settings (Настройки tab)
   settingDefaults: null,
+  lastTopUpdate: 0,        // throttle the top-10 list (100 gen/s is unreadable)
+  lastLogGen: null,        // throttle the event feed
+  wasShocking: false,      // dedupe shock entries in the race log
 };
 
 /* ---------- formatting ---------- */
@@ -129,8 +132,14 @@ function astToLatex(ast) {
       return `${L} \\cdot ${R}`;
     case "/":
       return `\\frac{${L}}{${R}}`;
-    case "mod":
-      return `${L} \\bmod ${R}`;
+    case "mod": {
+      // mod has the same precedence as +/-: wrap such children so the
+      // reading order is unambiguous (a+b mod c reads as a+(b mod c) to
+      // most people, but the AST means (a+b) mod c)
+      const wrapL = ast.l.t === "+" || ast.l.t === "-" || ast.l.t === "mod";
+      const wrapR = ast.r.t === "+" || ast.r.t === "-" || ast.r.t === "mod";
+      return `${wrapL ? `\\left(${L}\\right)` : L} \\bmod ${wrapR ? `\\left(${R}\\right)` : R}`;
+    }
     case "^":
       return `${isSimple(L) ? L : `\\left(${L}\\right)`}^{${R}}`;
   }
@@ -193,12 +202,14 @@ function lineSeries(label, color, dash) {
 }
 
 function makeCharts() {
-  const axisX = { ...axisOpts(), values: (u, vals) => vals.map((v) => String(Math.round(v))) };
+  // Axis titles make the charts self-explanatory: without them "1 -> 400"
+  // on the size histogram is meaningless to a reader.
+  const axisX = { ...axisOpts(), label: "поколение", values: (u, vals) => vals.map((v) => String(Math.round(v))) };
   const common = { ...baseOpts(170, [
       { label: "поколение" },
       lineSeries("лучшая", CHART_COLORS.accent),
       lineSeries("средняя", CHART_COLORS.muted, [4, 4]),
-    ], true), scales: { x: { time: false } }, axes: [axisX, axisOpts(3)] };
+    ], true), scales: { x: { time: false } }, axes: [axisX, { ...axisOpts(3), label: "fitness" }] };
 
   state.charts.fitness = new uPlot({ ...common }, [[], [], []], $("chartFitness"));
 
@@ -209,7 +220,7 @@ function makeCharts() {
         { ...lineSeries("лучшая", CHART_COLORS.amber), width: 2 },
         lineSeries("средняя", CHART_COLORS.muted, [4, 4]),
       ],
-      axes: [axisX, { ...axisOpts(3), values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
+      axes: [axisX, { ...axisOpts(3), label: "ошибка", values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
     [[], [], []], $("chartError"));
 
   state.charts.diversity = new uPlot(
@@ -218,7 +229,7 @@ function makeCharts() {
         { ...lineSeries("разнообразие", CHART_COLORS.teal), width: 1.5 },
       ], false),
       scales: { x: { time: false } },
-      axes: [axisX, axisOpts(2)] },
+      axes: [axisX, { ...axisOpts(2), label: "доля уникальных" }] },
     [[], []], $("chartDiversity"));
 
   const barsPath = window.uPlot && uPlot.paths && uPlot.paths.bars
@@ -230,7 +241,7 @@ function makeCharts() {
           points: { show: false }, paths: barsPath, fill: "rgba(139,147,248,0.18)" },
       ], false),
       scales: { x: { time: false } },
-      axes: [axisX, axisOpts()] },
+      axes: [{ ...axisX, label: "размер формулы (узлов)" }, { ...axisOpts(), label: "кол-во формул" }] },
     [[], []], $("chartSizes"));
 
   // hero mini-chart: the formula (line) against the target sequence (dots)
@@ -278,7 +289,10 @@ function resetBuffers() {
   state.raceLog = [];
   state.lastExactSize = Infinity;
   state.lastLoggedBest = null;
+  state.lastLogGen = null;
   state.lastGenNum = null;
+  state.lastTopUpdate = 0;
+  state.wasShocking = false;
   if (state.charts.hero) state.charts.hero.setData([[], [], []]);
   renderRaceLog();
 }
@@ -294,6 +308,26 @@ function scheduleChartUpdate() {
     state.charts.error.setData([b.gen, b.bestE, b.meanE]);
     state.charts.diversity.setData([b.gen, b.div]);
     state.charts.sizes.setData([b.sizesX, b.sizesY]);
+    
+    // Force the legend to show the latest values by moving the cursor.
+    // uPlot's setCursor({ idx }) is flaky if the chart hasn't fully laid
+    // out; passing the exact pixel position (left) is more reliable.
+    const lastIdx = b.gen.length - 1;
+    if (lastIdx >= 0) {
+      const f = state.charts.fitness;
+      const e = state.charts.error;
+      const d = state.charts.diversity;
+      const s = state.charts.sizes;
+      
+      // Only auto-move if the user isn't actively hovering (cursor.event is set on mouseover)
+      if (!f.cursor.event) {
+        f.setCursor({ left: f.valToPos(b.gen[lastIdx], 'x') });
+        e.setCursor({ left: e.valToPos(b.gen[lastIdx], 'x') });
+        d.setCursor({ left: d.valToPos(b.gen[lastIdx], 'x') });
+        s.setCursor({ left: s.valToPos(b.sizesX[lastIdx], 'x') });
+      }
+    }
+    
     resizeCharts();
   });
 }
@@ -304,6 +338,7 @@ function setChip(text, cls) {
   const chip = $("liveChip");
   chip.textContent = text;
   chip.className = "chip" + (cls ? " " + cls : "");
+  if (cls !== "error") chip.title = "";
 }
 
 function setStatus(status) {
@@ -351,7 +386,8 @@ function applyGen(msg) {
   errEl.textContent = msg.best.error === null ? "∞" : fmtPercent(msg.best.error);
   errEl.classList.toggle("ok", msg.best.error !== null && msg.best.error < 1e-9);
   $("kpiSize").textContent = String(msg.best.size);
-  $("kpiDiversity").textContent = fmtPercent(s.diversity);
+  const uniqueCount = Math.round(s.diversity * msg.population);
+  $("kpiDiversity").textContent = `${fmtPercent(s.diversity)} (${uniqueCount})`;
   $("kpiEvaluated").textContent =
     ((msg.gen + 1) * (msg.population || 500)).toLocaleString("ru-RU");
   const now = performance.now();
@@ -376,7 +412,12 @@ function applyGen(msg) {
   $("heroLabel").textContent = msg.solved && !msg.solved_now
     ? "Лучшая формула (усадка — ищем короче)" : "Лучшая формула";
 
-  renderTop(msg.top || []);
+  // top-10 list: at 100 gen/s it flickers unreadably. Throttle to ~3
+  // updates/s; force a redraw on the exact-hit event or during shrink.
+  if (now - state.lastTopUpdate > 300 || msg.solved_now || msg.solved) {
+    renderTop(msg.top || []);
+    state.lastTopUpdate = now;
+  }
   updateRaceLog(msg);
   renderTerms(msg.best);
   updateHeroChart(msg.best.values);
@@ -469,6 +510,12 @@ function renderTop(top) {
   top.forEach((item, i) => {
     const li = document.createElement("li");
     li.className = "race-item" + (i === 0 ? " leader" : "");
+    
+    // Hover preview: plot the formula against the target sequence
+    if (state.puzzleTerms && item.values) {
+      bindPlotHover(li, () => [state.puzzleTerms, item.values]);
+    }
+    
     const place = document.createElement("span");
     place.className = "race-place num";
     place.textContent = String(i + 1);
@@ -477,9 +524,11 @@ function renderTop(top) {
     f.className = "race-formula";
     renderKatex(f, astToLatex(item.ast), false);
     li.appendChild(f);
+    
     const meta = document.createElement("span");
     meta.className = "race-meta num";
     meta.textContent = `fit ${fmtNum(item.fitness)} · узлов ${item.size}`;
+    meta.title = "Fitness = 1 - ошибка - штраф_за_размер. Ближе к 1.0 — лучше.";
     li.appendChild(meta);
     list.appendChild(li);
   });
@@ -528,12 +577,13 @@ function renderRaceLog() {
 
 function updateRaceLog(msg) {
   state.lastGenNum = msg.gen;
-  if (msg.shock) {
+  if (msg.shock && !state.wasShocking) {
     pushLogEntry({
-      pre: "встряска: популяция застряла — подмешаны свежие формулы",
+      pre: "встряска: подмешаны свежие формулы",
       cls: "log-shock",
     });
   }
+  state.wasShocking = msg.shock;
   if (msg.solved_now) {
     pushLogEntry({ pre: "точное совпадение найдено", cls: "log-solved" });
   } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
@@ -544,19 +594,14 @@ function updateRaceLog(msg) {
   }
   state.lastExactSize = msg.best.exact ? msg.best.size : state.lastExactSize;
   if (msg.new_best && !msg.best.exact) {
-    // Feed only meaningful progress: the same formula grinding out a
-    // 0.1% error win, over and over, is noise — log a formula change
-    // or a big error drop, not every fitness tick.
-    const text = msg.best.text;
-    const last = state.lastLoggedBest;
-    const bigDrop = last === null
-      || msg.best.error <= last.error * 0.9;
-    if (bigDrop || text !== last?.text) {
+    // Log the new best, but throttle it to once per 10 generations so
+    // a 100 gen/s run doesn't turn the feed into an unreadable blur.
+    if (!state.lastLogGen || msg.gen - state.lastLogGen >= 10) {
       pushLogEntry({
         pre: "новая лучшая:", latex: astToLatex(msg.best.ast),
         text: `ошибка ${fmtPercent(msg.best.error)}`,
       });
-      state.lastLoggedBest = { text, error: msg.best.error };
+      state.lastLogGen = msg.gen;
     }
   } else if (msg.new_best && msg.best.exact && !msg.solved_now) {
     pushLogEntry({ pre: "новая лучшая:", latex: astToLatex(msg.best.ast) });
@@ -775,6 +820,15 @@ function markPuzzle(p) {
   const ref = document.createElement("span");
   renderKatex(ref, refToLatex(p.reference), false);
   solvedNote.appendChild(ref);
+  
+  // Calculate the reference size (rough estimate by counting tokens)
+  const refSize = p.reference.split(/[\+\-\*\/\^\(\)\s]+/).filter(Boolean).length;
+  const meta = document.createElement("span");
+  meta.style.marginLeft = "12px";
+  meta.style.color = "var(--muted)";
+  meta.style.fontSize = "12px";
+  meta.textContent = `(≈ ${refSize} узлов)`;
+  solvedNote.appendChild(meta);
 }
 
 async function loadHistory() {
@@ -805,8 +859,14 @@ async function loadHistory() {
     const f = addCell(tr, "td", "");
     if (h.formula_ast) renderKatex(f, astToLatex(h.formula_ast), false);
     else f.textContent = h.formula;
-    addCell(tr, "td", String(h.generations), "num");
-    addCell(tr, "td", fmtTime(h.time_s), "num");
+    const gensCell = addCell(tr, "td", String(h.generations), "num");
+    const timeCell = addCell(tr, "td", fmtTime(h.time_s), "num");
+    if (!h.solved) {
+      f.style.color = "var(--amber)";
+      gensCell.style.color = "var(--amber)";
+      timeCell.style.color = "var(--amber)";
+      tr.title = "Лучший результат (не решено)";
+    }
     bindPlotHover(tr, () => [h.sequence, h.values]);
     rows.appendChild(tr);
   }
@@ -938,6 +998,12 @@ async function startRun(event) {
   event.preventDefault();
   $("solvedNote").classList.remove("show");
   state.lastRunSolved = false;
+  
+  if (state.ops.size === 0) {
+    alertErr("выберите хотя бы одну операцию");
+    return;
+  }
+  
   const puzzleId = $("puzzleSelect").value || null;
   let body;
   if (puzzleId) {
@@ -972,6 +1038,7 @@ async function startRun(event) {
 
 function alertErr(message) {
   setChip("ошибка", "error");
+  $("liveChip").title = message;
   console.error(message);
 }
 
@@ -1076,7 +1143,49 @@ function flashSettingsMeta(text) {
   }, 2500);
 }
 
+function initFromUrlAndStorage() {
+  // Restore ops from localStorage, stripping any stray spaces that
+  // might have been saved by an older version of the URL parser.
+  const savedOps = localStorage.getItem("seq2formula_ops");
+  if (savedOps) {
+    try {
+      const parsed = JSON.parse(savedOps);
+      if (Array.isArray(parsed)) {
+        const clean = parsed.filter(o => typeof o === 'string' && o.trim() !== '');
+        if (clean.length > 0) state.ops = new Set(clean);
+      }
+    } catch (e) { /* ignore corrupted localStorage */ }
+  }
+  
+  // Override with URL params if present
+  const urlParams = new URLSearchParams(window.location.search);
+  const seq = urlParams.get('seq');
+  if (seq) $("seqInput").value = seq;
+  
+  const urlOps = urlParams.get('ops');
+  if (urlOps) {
+    state.ops.clear();
+    if (urlOps === 'all') {
+      Object.keys(TOKEN_LABELS).forEach(k => state.ops.add(k));
+    } else {
+      // URLSearchParams decodes '+' as ' ', so we fix it back.
+      const fixedOps = urlOps.replace(/ /g, '+');
+      fixedOps.split(',').forEach(o => {
+        const clean = o.trim();
+        if (clean) state.ops.add(clean);
+      });
+    }
+  }
+
+  // Sync chips UI
+  document.querySelectorAll(".op-chip").forEach(chip => {
+    chip.setAttribute("aria-pressed", String(state.ops.has(chip.dataset.op)));
+  });
+}
+
 function bindControls() {
+  initFromUrlAndStorage();
+  
   $("runForm").addEventListener("submit", startRun);
   $("seqInput").addEventListener("input", () => {
     $("puzzleSelect").value = "";
@@ -1153,6 +1262,7 @@ function bindControls() {
       const on = !state.ops.has(op);
       state.ops[on ? "add" : "delete"](op);
       chip.setAttribute("aria-pressed", String(on));
+      localStorage.setItem("seq2formula_ops", JSON.stringify([...state.ops]));
       updateOpsHint();
     });
   });

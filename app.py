@@ -42,7 +42,7 @@ CURIOSITY_PER_RUN = 4    # best entries saved from one run
 
 MIN_TERMS, MAX_TERMS = 2, 32
 TERM_ABS_LIMIT = 1e9
-DEFAULT_GPS = 30.0
+DEFAULT_GPS = 100.0
 
 # Engine knobs the Настройки tab can change; a fresh store starts here.
 # Population/parsimony/max_generations default a RUN when the request does
@@ -50,7 +50,7 @@ DEFAULT_GPS = 30.0
 DEFAULT_SETTINGS = {
     "population": 500,
     "max_generations": 10000,
-    "speed_max": 60,          # upper bound of the dashboard speed slider
+    "speed_max": 100,         # upper bound of the dashboard speed slider
     "parsimony": 0.003,
     "max_depth": 6,
     "tournament": 3,
@@ -268,6 +268,7 @@ class RunManager:
             raise HTTPException(409, "no active run")
         if action == "pause" and self.status == "running":
             self.status = "paused"
+            self._save_custom_best()
         elif action == "resume" and self.status in ("paused", "running"):
             self.status = "running"
         elif action == "continue":
@@ -289,6 +290,39 @@ class RunManager:
             self.stop(reason="stopped_by_user")
             return self.snapshot()
         return self.snapshot()
+
+    def _save_custom_best(self) -> None:
+        """Save the current best formula to history even if unsolved."""
+        if not self.engine or not self.engine.best_ever or not self.terms:
+            return
+        best = self.engine.best_ever
+        # Only save if it's better than a random guess (e.g. error < 20%)
+        if best.score.error > 0.2:
+            return
+
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "seq_key": _seq_key(self.terms),
+            "sequence": self.terms,
+            "puzzle": self.puzzle["name"] if self.puzzle else None,
+            "formula": to_text(best.node),
+            "formula_ast": to_dict(best.node),
+            "size": best.score.size,
+            "values": ([round(v, 6) for v in best.score.values]
+                       if best.score.values else None),
+            "generations": self.engine.generation,
+            "time_s": round(time.perf_counter() - self.started_at, 3),
+            "settings": self.config_summary,
+            "solved": False,
+        }
+        history = _load_json(HISTORY_FILE, [])
+        # Don't save if we already have a better (or equal) unsolved entry
+        existing = [h for h in history if h["seq_key"] == entry["seq_key"] and not h["solved"]]
+        if existing and existing[-1]["size"] <= entry["size"]:
+            return
+            
+        history.append(entry)
+        _save_json(HISTORY_FILE, history[-HISTORY_CAP:])
 
     def stop(self, reason: str, notify: bool = True) -> None:
         if self.task is not None:
@@ -361,6 +395,9 @@ class RunManager:
         assert self.engine is not None
         solved = self.engine.solved
         entry = None
+        
+        if not solved:
+            self._save_custom_best()
         if solved:
             best = self.engine.shortest_exact or self.engine.best_ever
             entry = {
