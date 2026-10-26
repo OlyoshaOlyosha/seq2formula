@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass
 
 from .evaluator import evaluate_all
-from .nodes import Node, size
+from .nodes import Node, size, weighted_size, weighted_size
 
 EPS = 1e-9
 # Invalid candidates (division by zero, overflow) must not win selection;
@@ -41,7 +41,7 @@ class Score:
 
 
 def score_candidate(node: Node, seq: list[float], parsimony: float) -> Score:
-    tree_size = size(node)
+    tree_size = int(weighted_size(node))
     values = evaluate_all(node, len(seq))
     if values is None:
         return Score(INVALID_FITNESS, math.inf, False, None, None, tree_size)

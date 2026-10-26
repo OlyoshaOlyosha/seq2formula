@@ -80,6 +80,20 @@ def size(node: Node) -> int:
     return 1
 
 
+def weighted_size(node: Node) -> float:
+    """Complexity of a tree: basic arithmetic is cheap, exotic ops are
+    expensive. Used for parsimony so the search prefers 2*n+1 over
+    (n mod 4)! even when both are exact."""
+    if isinstance(node, BinOp):
+        weight = 2.0 if node.op in ("^", "mod") else 1.0
+        return weight + weighted_size(node.left) + weighted_size(node.right)
+    if isinstance(node, UnOp):
+        return 2.0 + weighted_size(node.child)
+    if isinstance(node, Neg):
+        return 1.0 + weighted_size(node.child)
+    return 1.0  # Var / Const
+
+
 def depth(node: Node) -> int:
     if isinstance(node, BinOp):
         return 1 + max(depth(node.left), depth(node.right))

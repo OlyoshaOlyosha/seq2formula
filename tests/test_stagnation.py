@@ -23,9 +23,14 @@ def test_shock_fires_periodically_when_stuck():
                    GPConfig(seed=9, stagnation_window=5, shock_fraction=0.5,
                             allowed_ops=("+", "-", "*", "/")))
     shocks = 0
+    was_shocking = False
     for _ in range(60):
         result = eng.step()
-        shocks += result.shock
+        # a shock now lasts multiple generations: count the START of an
+        # episode, not every generation inside it
+        if result.shock and not was_shocking:
+            shocks += 1
+        was_shocking = result.shock
     assert eng.shocks == shocks
     assert shocks >= 2, f"expected repeated shocks, got {shocks}"
 

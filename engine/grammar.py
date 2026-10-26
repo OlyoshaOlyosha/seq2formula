@@ -303,3 +303,27 @@ def crossover(rng: random.Random, a: Node, b: Node,
         if depth(child) <= max_depth:
             return child
     return a
+
+
+def root_mutation(rng: random.Random, tree: Node,
+                  ops: tuple[str, ...] = BINARY_OPS,
+                  funcs: tuple[str, ...] = (),
+                  specials: tuple[float, ...] = ()) -> Node:
+    """Structural jump: wrap the whole tree in a new root operation.
+
+    Random trees are mostly invalid (div-zero / domain) and die before
+    they can express anything new. Wrapping the current best in a new
+    operation (sqrt(best), best + n, best mod 3) guarantees a valid
+    formula and forces exploration of a new structural family."""
+    if funcs and rng.random() < 0.5:
+        name = rng.choice(funcs)
+        return UnOp(name, tree)
+    op = rng.choice(ops)
+    if op == "^":
+        if rng.random() < 0.5:
+            return BinOp(op, tree, _rand_exp(rng))
+        return BinOp(op, _rand_base(rng), tree)
+    other = random_tree(rng, 2, "grow", ops, funcs, specials)
+    if rng.random() < 0.5:
+        return BinOp(op, tree, other)
+    return BinOp(op, other, tree)

@@ -50,8 +50,18 @@ SIZE_HIST_BINS = 20
 # population is replaced with fresh random trees — the usual GP failure
 # is a degenerate population grinding smaller-and-smaller wrong formulas.
 # 0 disables the mechanism entirely.
-STAGNATION_WINDOW = 60
+#
+# Adaptive: the window is the WAIT before a shock. Each shock lasts
+# `shock_duration` generations — a single-generation shot never sticks,
+# fresh randoms get out-selected before they can breed. If a shock fails
+# to produce a new best, the next wait grows by `stagnation_factor`
+# (30 → 45 → 67 → 100 → ... capped at `stagnation_max`). Any new best
+# resets the wait back to the base.
+STAGNATION_WINDOW = 30
 SHOCK_FRACTION = 0.25
+SHOCK_DURATION = 10
+STAGNATION_MAX = 120
+STAGNATION_FACTOR = 1.2
 
 
 @dataclass
@@ -78,9 +88,17 @@ class GPConfig:
     # shrink-phase knobs, exposed to the settings tab
     shrink_generations: int = SHRINK_GENERATIONS
     shrink_parsimony: float = SHRINK_PARSIMONY
-    # anti-stagnation: generations without a new best before a shock
-    stagnation_window: int = STAGNATION_WINDOW   # 0 = off
+    # anti-stagnation: base wait before a shock (0 = off entirely)
+    stagnation_window: int = STAGNATION_WINDOW
     shock_fraction: float = SHOCK_FRACTION
+    # how many generations each shock lasts, and adaptive escalation
+    # of the wait between shocks
+    shock_duration: int = SHOCK_DURATION
+    stagnation_max: int = STAGNATION_MAX
+    stagnation_factor: float = STAGNATION_FACTOR
+    # fraction of each generation replaced by random trees to prevent
+    # the population from collapsing into identical clones
+    random_immigrants: float = 0.02
 
 
 @dataclass
@@ -111,6 +129,7 @@ class GenerationResult:
     solved_now: bool        # first exact hit in this generation
     solved: bool            # run has an exact formula (any past gen)
     shock: bool             # stagnation shock fired this generation
+    shock_window: int = 0   # current wait threshold (for the event feed)
     top: list[dict] = field(default_factory=list)  # leaderboard, best first
     stats: dict = field(default_factory=dict)
     elapsed_ms: float = 0.0
@@ -127,6 +146,7 @@ class GenerationResult:
             "solved_now": self.solved_now,
             "solved": self.solved,
             "shock": self.shock,
+            "shock_window": self.shock_window,
             "stats": self.stats,
             "elapsed_ms": round(self.elapsed_ms, 2),
         }
@@ -163,6 +183,10 @@ class GPEngine:
         self.stagnation = 0   # generations since the last new best
         self.shocks = 0       # shocks fired over the whole run
         self._shock_now = False
+        # adaptive shock state: current wait threshold (grows on each
+        # useless shock, resets on any new best) and remaining shock gens
+        self.current_window = self.cfg.stagnation_window
+        self.shock_remaining = 0
         self.curiosities: dict[tuple, dict] = {}
 
     # -- one generation -------------------------------------------------
@@ -184,6 +208,7 @@ class GPEngine:
                      else self.cfg.parsimony)
         scored = [(node, score_candidate(node, self.seq, parsimony))
                   for node in self.population]
+
         # Stats come from the raw scores: the winner-take-all override
         # below would plunge the dashboard's mean fitness to -1.
         stats = self._stats(
@@ -197,21 +222,57 @@ class GPEngine:
                     sc.fitness = INVALID_FITNESS
         scored.sort(key=lambda pair: pair[1].fitness, reverse=True)
         self._exact_pool = [pair for pair in scored if pair[1].exact]
-        best_node, best_score = scored[0]
-
+        
+        # Find the true best by RAW fitness (ignoring clone penalty)
+        true_best_node = max(scored, key=lambda pair: pair[1].fitness + 
+                             (0.001 if pair[1].values else 0))[0]
+        true_best_score = next(sc for n, sc in scored if n is true_best_node)
+        
         new_best = (self.best_ever is None
-                    or best_score.fitness > self.best_ever.score.fitness + 1e-12)
+                    or true_best_score.fitness > self.best_ever.score.fitness + 1e-12)
         if new_best:
-            self.best_ever = Best(best_node, best_score)
-        # Anti-stagnation: no new best for `stagnation_window` generations
-        # while unsolved -> shock the population (fresh blood in _breed).
-        self.stagnation = 0 if new_best else self.stagnation + 1
-        self._shock_now = (
-            not self.solved and self.cfg.stagnation_window > 0
-            and self.stagnation >= self.cfg.stagnation_window)
-        if self._shock_now:
+            self.best_ever = Best(true_best_node, true_best_score)
+
+        # Fitness Sharing: penalize clones AFTER determining new_best.
+        # If 400 out of 500 formulas produce the exact same output (like
+        # the constant "1"), they form an unbeatable "clone army". We
+        # subtract 0.001 per duplicate. A formula with 400 clones loses
+        # 0.4 fitness, dropping below a diverse formula with a slightly
+        # worse raw score.
+        if not self.solved:
+            from collections import Counter
+            keys = [tuple(round(v, 4) for v in sc.values) if sc.values else ()
+                    for _, sc in scored]
+            counts = Counter(keys)
+            for (node, sc), key in zip(scored, keys):
+                if key and counts[key] > 1:
+                    sc.fitness -= (counts[key] - 1) * 0.001
+            scored.sort(key=lambda pair: pair[1].fitness, reverse=True)
+            best_node, best_score = scored[0]
+        # Anti-stagnation: adaptive shock. Any new best resets the wait
+        # to the base; a shock lasts `shock_duration` generations (a
+        # single generation never sticks — fresh randoms get out-selected
+        # before they can breed), and a useless shock escalates the next
+        # wait by `stagnation_factor` up to `stagnation_max`.
+        if new_best:
             self.stagnation = 0
+            self.current_window = self.cfg.stagnation_window
+            self.shock_remaining = 0   # cancel an ongoing shock
+        elif self.shock_remaining == 0:
+            self.stagnation += 1
+        # (during a shock the wait counter stays frozen)
+        if (not self.solved and self.cfg.stagnation_window > 0
+                and self.shock_remaining == 0
+                and self.stagnation >= self.current_window):
+            self.shock_remaining = self.cfg.shock_duration
             self.shocks += 1
+            self.stagnation = 0
+            self.current_window = min(
+                self.cfg.stagnation_max,
+                int(self.current_window * self.cfg.stagnation_factor))
+        self._shock_now = self.shock_remaining > 0
+        if self._shock_now:
+            self.shock_remaining -= 1
 
         # Solve detection scans the WHOLE population, not just the fitness
         # leader: a big-but-exact formula can legitimately lose on fitness
@@ -230,8 +291,23 @@ class GPEngine:
                 self.shortest_exact = Best(node, sc)
 
         self._collect_curiosities(scored)
+        # Top-10 by fitness, skipping invalid / shrink-overridden (-1)
+        # entries and deduplicating by values so the leaderboard shows
+        # 10 *distinct* formulas, not 10 copies of "1".
         top = []
-        for node, sc in scored[:5]:
+        seen_values = set()
+        for node, sc in scored:
+            if len(top) >= 10:
+                break
+            if sc.fitness == INVALID_FITNESS and not self.solved:
+                continue
+            if self.solved and not sc.exact:
+                continue  # during shrink, only show exact formulas
+            if sc.values is not None:
+                val_key = tuple(round(v, 4) for v in sc.values)
+                if val_key in seen_values:
+                    continue
+                seen_values.add(val_key)
             top.append({
                 "text": to_text(node),
                 "ast": to_dict(node),
@@ -239,14 +315,24 @@ class GPEngine:
                 "size": sc.size,
                 "error": None if sc.error == float("inf")
                          else round(sc.error, 8),
+                "values": None if sc.values is None
+                          else [round(v, 6) for v in sc.values],
             })
+        # The UI must show the historical best (best_ever), otherwise
+        # the displayed error jumps around when Fitness Sharing penalizes
+        # clones and a worse formula temporarily wins the generation.
+        display_best = self.best_ever
+        if self.solved and self.shortest_exact:
+            display_best = self.shortest_exact
+
         result = GenerationResult(
             gen=self.generation,
-            best=Best(best_node, best_score),
+            best=display_best,
             new_best=new_best,
             solved_now=solved_now,
             solved=self.solved,
             shock=self._shock_now,
+            shock_window=self.current_window if self._shock_now else 0,
             top=top,
             stats=stats,
             elapsed_ms=(time.perf_counter() - started) * 1000.0,
@@ -270,13 +356,21 @@ class GPEngine:
         else:
             elite = [node for node, _ in scored[:cfg.elitism]]
         offspring: list[Node] = []
+        # Random immigrants: a small, constant trickle of fresh trees
+        # keeps baseline diversity from collapsing into clones.
+        immigrants = int(cfg.population * cfg.random_immigrants)
+        for _ in range(immigrants):
+            if len(elite) + len(offspring) < cfg.population:
+                offspring.append(random_tree(
+                    self.rng, 3, "grow", self.ops, self.funcs, self.specials))
+        
         while len(elite) + len(offspring) < cfg.population:
             if self._shock_now and self.rng.random() < cfg.shock_fraction:
-                # Stagnation shock: fresh random trees instead of more of
-                # the same bloodline; elites above are untouched.
+                # Stagnation shock: shallow random trees (depth 3) survive
+                # selection better than deep ones because they incur almost
+                # no parsimony penalty and are less likely to be invalid.
                 offspring.append(random_tree(
-                    self.rng, cfg.max_depth, "grow", self.ops, self.funcs,
-                    self.specials))
+                    self.rng, 3, "grow", self.ops, self.funcs, self.specials))
                 continue
             a = self._tournament(scored)
             if self.rng.random() < cfg.p_crossover:
@@ -337,8 +431,12 @@ class GPEngine:
         for s in sizes:
             hist[min(s, SIZE_HIST_BINS) - 1] += 1
         valid = [s for s in scores if s.values is not None]
+        # Denominator is the VALID count, not the total: fresh random
+        # shock trees are often invalid (div-zero / domain / overflow),
+        # and including them in the denominator capped the KPI at ~50%
+        # even when every valid formula was unique.
         diversity = (len({tuple(round(v, 4) for v in s.values) for s in valid})
-                     / len(scored))
+                     / max(1, len(valid)))
         return {
             "best_fitness": round(scores[0].fitness, 6),
             "mean_fitness": round(sum(s.fitness for s in scores) / len(scores), 6),
