@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -71,6 +71,14 @@ def load_settings() -> dict:
 app = FastAPI(title="seq2formula")
 
 
+@app.middleware("http")
+async def add_no_cache_header(request: Request, call_next):
+    response = await call_next(request)
+    # Local single-user app: never cache anything to avoid stale static files.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
+
+
 # --------------------------------------------------------------------------
 # Small JSON-file storage (single user, single writer: plain save is fine)
 # --------------------------------------------------------------------------
@@ -121,6 +129,7 @@ class RunRequest(BaseModel):
     max_generations: int | None = Field(default=None, ge=10, le=100000)
     speed: float = Field(default=DEFAULT_GPS, ge=0.5, le=240)
     ops: list[str] | None = None  # feature tokens (ops/funcs/consts); None = all
+    reference: str | None = None  # user-provided reference formula
 
 
 class SettingsRequest(BaseModel):
@@ -160,6 +169,7 @@ class RunManager:
         self.finish_reason: str | None = None
         self.config_summary: dict = {}
         self.continue_mode = False
+        self.custom_reference: str | None = None
         self.clients: set[WebSocket] = set()
 
     # -- websocket plumbing ------------------------------------------------
@@ -213,6 +223,7 @@ class RunManager:
         self.terms = terms
         self.last_gen = None
         self.finish_reason = None
+        self.custom_reference = request.reference
         # remembered so the history entry can show how the run was tuned
         self.config_summary = {
             "population": config.population,
@@ -310,9 +321,11 @@ class RunManager:
             "size": best.score.size,
             "values": ([round(v, 6) for v in best.score.values]
                        if best.score.values else None),
+            "error": round(best.score.error, 6),
             "generations": self.engine.generation,
             "time_s": round(time.perf_counter() - self.started_at, 3),
             "settings": self.config_summary,
+            "reference": self.custom_reference,
             "solved": False,
         }
         history = _load_json(HISTORY_FILE, [])
@@ -414,6 +427,7 @@ class RunManager:
                 "time_s": round(self.solved_wall_time or
                                 (time.perf_counter() - self.started_at), 3),
                 "settings": self.config_summary,
+                "reference": self.custom_reference,
                 "solved": True,
             }
             history = _load_json(HISTORY_FILE, [])
