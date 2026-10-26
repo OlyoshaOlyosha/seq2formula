@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-91%20passed-3FC07A)
+![Tests](https://img.shields.io/badge/tests-98%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 seq2formula — локальный эксперимент в области символьной регрессии: по
