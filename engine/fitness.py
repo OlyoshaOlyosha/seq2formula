@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass
 
 from .evaluator import evaluate_all
-from .nodes import Node, size, weighted_size, weighted_size
+from .nodes import Node, weighted_size
 
 EPS = 1e-9
 # Invalid candidates (division by zero, overflow) must not win selection;
@@ -30,7 +30,7 @@ def term_error(got: float, target: float) -> float:
     return min(1.0, abs(got - target) / max(1.0, abs(target)))
 
 
-@dataclass
+@dataclass(slots=True)
 class Score:
     fitness: float
     error: float  # mean per-term error; math.inf for invalid candidates
@@ -45,7 +45,11 @@ def score_candidate(node: Node, seq: list[float], parsimony: float) -> Score:
     values = evaluate_all(node, len(seq))
     if values is None:
         return Score(INVALID_FITNESS, math.inf, False, None, None, tree_size)
-    errors = [term_error(got, target) for got, target in zip(values, seq)]
+    
+    # Inlined term_error logic to avoid thousands of function calls per generation
+    errors = [min(1.0, abs(got - target) / max(1.0, abs(target))) 
+              for got, target in zip(values, seq)]
+              
     error = sum(errors) / len(errors)
     exact = all(e < EPS for e in errors)
     fitness = (1.0 - error) - parsimony * tree_size

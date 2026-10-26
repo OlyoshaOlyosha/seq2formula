@@ -26,11 +26,15 @@ import random
 from .nodes import VAR, BinOp, Const, Neg, Node, UnOp, Var, depth, size
 
 BINARY_OPS = ("+", "-", "*", "/", "^", "mod")
-CONST_RANGE = (-5, 5)
-# Half-integers exist for the rational tier ((n+3)/2 = 0.5n + 1.5);
-# they show up in a quarter of constant draws, the rest are integers.
+# Small integers cover the classic puzzles; the LARGE_CONSTS bucket makes
+# bigger coefficients reachable (1000*n for a "1000 2000 3000" sequence)
+# without flooding normal formulas. Draw probabilities below set the
+# balance: 65% small ints, 25% halves, 10% large.
+CONST_RANGE = (-10, 10)
 HALF_CONSTS = (-1.5, -0.5, 0.5, 1.5)
 HALF_CONST_P = 0.25
+LARGE_CONSTS = (20, 25, 50, 100, 1000)
+LARGE_CONST_P = 0.10
 EXP_RANGE = (-3, 3)   # constant exponent for the n^k form
 BASE_RANGE = (-3, 3)  # constant base for the k^n form
 MAX_INIT_DEPTH = 6
@@ -46,7 +50,13 @@ SPECIAL_CONST_P = 0.12
 def _rand_const(rng: random.Random, specials: tuple[float, ...] = ()) -> Const:
     if specials and rng.random() < SPECIAL_CONST_P:
         return Const(rng.choice(specials))
-    if rng.random() < HALF_CONST_P:
+    roll = rng.random()
+    if roll < LARGE_CONST_P:
+        # large constants are reachable but rare: a formula naturally
+        # uses 1, 2, 0.5 far more often than 1000, so the search should
+        # try them far more often too
+        return Const(float(rng.choice(LARGE_CONSTS) * rng.choice((-1, 1))))
+    if roll < LARGE_CONST_P + HALF_CONST_P:
         return Const(rng.choice(HALF_CONSTS))
     return Const(float(rng.randint(*CONST_RANGE)))
 
@@ -140,21 +150,24 @@ def random_path(rng: random.Random, node: Node) -> tuple[int, ...]:
     walk produced) with a single counting descent — building the whole
     path list per operator call was a hot-loop cost."""
     k = rng.randrange(size(node))
-    path: tuple[int, ...] = ()
+    path: list[int] = []
     while k:
         k -= 1
         if isinstance(node, BinOp):
             left_size = size(node.left)
             if k < left_size:
-                node, path = node.left, path + (0,)
+                node = node.left
+                path.append(0)
             else:
                 k -= left_size
-                node, path = node.right, path + (1,)
+                node = node.right
+                path.append(1)
         elif isinstance(node, (Neg, UnOp)):
-            node, path = node.child, path + (0,)
+            node = node.child
+            path.append(0)
         else:  # leaf: k was within the subtree, so it must be 0 here
             break
-    return path
+    return tuple(path)
 
 
 def _repair_splice(node: Node, path: tuple[int, ...], rng: random.Random,

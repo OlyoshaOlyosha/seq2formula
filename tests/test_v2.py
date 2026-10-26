@@ -105,13 +105,17 @@ def test_factorial_sequence_is_exact_by_values():
 # ---------- grammar ----------
 
 def test_random_tree_respects_funcs_and_specials():
+    from engine.grammar import CONST_RANGE, HALF_CONSTS, LARGE_CONSTS
     rng = random.Random(11)
+    allowed = (set(range(CONST_RANGE[0], CONST_RANGE[1] + 1))
+               | set(HALF_CONSTS)
+               | set(LARGE_CONSTS) | {-v for v in LARGE_CONSTS}
+               | {math.pi})
     for _ in range(200):
         tree = random_tree(rng, 5, "grow", ("+", "*"),
                            ("sqrt", "sin"), (math.pi,))
         assert all(f in ("sqrt", "sin") for f in collect_funcs(tree))
-        assert _consts_within(tree, {math.pi} | set(range(-5, 6))
-                              | {-1.5, -0.5, 0.5, 1.5})
+        assert _consts_within(tree, allowed)
 
 
 def _consts_within(node, allowed):

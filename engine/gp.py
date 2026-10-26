@@ -13,6 +13,7 @@ when to stop.
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -27,7 +28,7 @@ from .grammar import (
     shrink_mutation,
     subtree_mutation,
 )
-from .nodes import UNARY_FUNCS, Node, special_value, to_dict, to_text
+from .nodes import UNARY_FUNCS, Node, special_value, to_dict, to_text, simplify
 
 # Curiosity gallery: "almost correct" (mean error below) but comically
 # overbuilt (size at least) formulas, deduped by the values they produce.
@@ -64,7 +65,7 @@ STAGNATION_MAX = 120
 STAGNATION_FACTOR = 1.2
 
 
-@dataclass
+@dataclass(slots=True)
 class GPConfig:
     # Defaults tuned on the deception case (2^n vs the n^2 local optimum,
     # 6 seeds x 800 gens): pop 500 + mutation 0.25 solved 5/6; higher
@@ -101,7 +102,7 @@ class GPConfig:
     random_immigrants: float = 0.02
 
 
-@dataclass
+@dataclass(slots=True)
 class Best:
     node: Node
     score: Score
@@ -121,7 +122,7 @@ class Best:
         }
 
 
-@dataclass
+@dataclass(slots=True)
 class GenerationResult:
     gen: int
     best: Best
@@ -206,13 +207,16 @@ class GPEngine:
         # parsimony weight makes any size difference outweigh error noise.
         parsimony = (self.cfg.shrink_parsimony if self.solved
                      else self.cfg.parsimony)
-        scored = [(node, score_candidate(node, self.seq, parsimony))
-                  for node in self.population]
+        scored = []
+        for node in self.population:
+            simp_node = simplify(node, self.ops)
+            scored.append((simp_node, score_candidate(simp_node, self.seq, parsimony)))
+        self.population = [n for n, _ in scored]
 
         # Stats come from the raw scores: the winner-take-all override
         # below would plunge the dashboard's mean fitness to -1.
-        stats = self._stats(
-            sorted(scored, key=lambda pair: pair[1].fitness, reverse=True))
+        stats = self._stats(scored)
+        
         if self.solved:
             # Winner-take-all shrink: almost-correct trees must not outrank
             # exact ones, or selection drifts off the solution and the
@@ -220,16 +224,23 @@ class GPEngine:
             for _, sc in scored:
                 if not sc.exact:
                     sc.fitness = INVALID_FITNESS
-        scored.sort(key=lambda pair: pair[1].fitness, reverse=True)
-        self._exact_pool = [pair for pair in scored if pair[1].exact]
-        
-        # Find the true best by RAW fitness (ignoring clone penalty)
-        true_best_node = max(scored, key=lambda pair: pair[1].fitness + 
-                             (0.001 if pair[1].values else 0))[0]
-        true_best_score = next(sc for n, sc in scored if n is true_best_node)
-        
+                    
+        # Find the most accurate formula (lowest error). The UI must show 
+        # the most precise formula, not just the one with the best fitness 
+        # (which might be shorter but less accurate). Tracking the minimum 
+        # error also prevents the displayed error from jumping around when 
+        # parsimony penalizes a highly accurate but large formula.
+        true_best_error = math.inf
+        true_best_node = scored[0][0]
+        true_best_score = scored[0][1]
+        for node, sc in scored:
+            if sc.values is not None and sc.error < true_best_error:
+                true_best_error = sc.error
+                true_best_node = node
+                true_best_score = sc
+                
         new_best = (self.best_ever is None
-                    or true_best_score.fitness > self.best_ever.score.fitness + 1e-12)
+                    or true_best_score.error < self.best_ever.score.error - 1e-12)
         if new_best:
             self.best_ever = Best(true_best_node, true_best_score)
 
@@ -247,8 +258,10 @@ class GPEngine:
             for (node, sc), key in zip(scored, keys):
                 if key and counts[key] > 1:
                     sc.fitness -= (counts[key] - 1) * 0.001
-            scored.sort(key=lambda pair: pair[1].fitness, reverse=True)
-            best_node, best_score = scored[0]
+                    
+        # Sort exactly once, after all fitness modifications
+        scored.sort(key=lambda pair: pair[1].fitness, reverse=True)
+        self._exact_pool = [pair for pair in scored if pair[1].exact]
         # Anti-stagnation: adaptive shock. Any new best resets the wait
         # to the base; a shock lasts `shock_duration` generations (a
         # single generation never sticks — fresh randoms get out-selected
@@ -437,15 +450,18 @@ class GPEngine:
         # even when every valid formula was unique.
         diversity = (len({tuple(round(v, 4) for v in s.values) for s in valid})
                      / max(1, len(valid)))
+                     
+        best_score = max(scores, key=lambda s: s.fitness)
+        
         return {
-            "best_fitness": round(scores[0].fitness, 6),
+            "best_fitness": round(best_score.fitness, 6),
             "mean_fitness": round(sum(s.fitness for s in scores) / len(scores), 6),
-            "best_error": None if scores[0].error == float("inf")
-                          else round(scores[0].error, 8),
+            "best_error": None if best_score.error == float("inf")
+                          else round(best_score.error, 8),
             "mean_error": (round(sum(s.error for s in valid) / len(valid), 8)
                            if valid else None),
             "mean_size": round(sum(sizes) / len(sizes), 2),
-            "best_size": scores[0].size,
+            "best_size": best_score.size,
             "size_hist": hist,
             "diversity": round(diversity, 4),
             "valid_frac": round(len(valid) / len(scores), 4),

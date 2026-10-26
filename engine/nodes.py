@@ -80,18 +80,35 @@ def size(node: Node) -> int:
     return 1
 
 
+def const_weight(value: float) -> float:
+    """Parsimony cost of a constant. Small ints and halves are atomic
+    primitives (they ARE the answer to many puzzles); 1000 is a compound
+    value that just happens to have short notation. Cost grows with the
+    digit count — a proxy for 'how compound a number is'. This stops
+    the search from filling formulas with magic constants that fit by
+    coincidence (same reasoning as ^ and mod costing 2 in
+    weighted_size: unusual values should earn their place)."""
+    if abs(value) < 1:
+        return 1.0  # halves are primitives (0.5, 1.5 build rational puzzles)
+    return float(len(str(int(abs(value)))))  # 1-9: 1, 10-99: 2, 100-999: 3, 1000: 4
+
+
 def weighted_size(node: Node) -> float:
-    """Complexity of a tree: basic arithmetic is cheap, exotic ops are
-    expensive. Used for parsimony so the search prefers 2*n+1 over
-    (n mod 4)! even when both are exact."""
+    """Complexity of a tree: basic arithmetic is cheap, exotic ops and
+    large constants are expensive. Used for parsimony so the search
+    prefers 2*n+1 over (n mod 4)! or 1000*n/500 even when both are exact."""
     if isinstance(node, BinOp):
-        weight = 2.0 if node.op in ("^", "mod") else 1.0
+        # Exponentiation (^) is as fundamental as multiplication, so it
+        # costs 1.0. Modulo is a "patch" operation, it costs 2.0.
+        weight = 2.0 if node.op == "mod" else 1.0
         return weight + weighted_size(node.left) + weighted_size(node.right)
     if isinstance(node, UnOp):
         return 2.0 + weighted_size(node.child)
     if isinstance(node, Neg):
         return 1.0 + weighted_size(node.child)
-    return 1.0  # Var / Const
+    if isinstance(node, Const):
+        return const_weight(node.value)
+    return 1.0  # Var
 
 
 def depth(node: Node) -> int:
@@ -102,6 +119,160 @@ def depth(node: Node) -> int:
     return 1
 
 
+def _extract_factors(node: Node) -> list[Node]:
+    """Recursively flatten multiplication chains into a list of factors."""
+    if isinstance(node, BinOp) and node.op == "*":
+        return _extract_factors(node.left) + _extract_factors(node.right)
+    return [node]
+
+
+def _extract_terms(node: Node, sign: float = 1.0) -> list[tuple[float, Node]]:
+    """Recursively flatten +/- chains into a list of (coefficient, term)."""
+    if isinstance(node, BinOp) and node.op == "+":
+        return _extract_terms(node.left, sign) + _extract_terms(node.right, sign)
+    if isinstance(node, BinOp) and node.op == "-":
+        return _extract_terms(node.left, sign) + _extract_terms(node.right, -sign)
+    if isinstance(node, Neg):
+        return _extract_terms(node.child, -sign)
+    if isinstance(node, BinOp) and node.op == "*":
+        if isinstance(node.left, Const):
+            return [(sign * node.left.value, node.right)]
+        if isinstance(node, Const) or isinstance(node.right, Const):
+            if isinstance(node.right, Const):
+                return [(sign * node.right.value, node.left)]
+    return [(sign, node)]
+
+
+def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")) -> Node:
+    """Algebraic simplification: x + x -> 2 * x, x * 1 -> x, etc.
+    Makes formulas shorter, prettier, and faster to evaluate."""
+    if isinstance(node, BinOp):
+        left = simplify(node.left, ops)
+        right = simplify(node.right, ops)
+
+        # 1. Flatten and combine additions/subtractions (x + x -> 2x, n + n - 1 -> 2n - 1)
+        if node.op in ("+", "-"):
+            terms = _extract_terms(BinOp(node.op, left, right))
+            combined: dict[Node, float] = {}
+            for coeff, term in terms:
+                # Round to 6 decimals to prevent float artifacts (0.1 + 0.2 -> 0.3)
+                combined[term] = round(combined.get(term, 0.0) + coeff, 6)
+
+            # Remove zeros
+            combined = {t: c for t, c in combined.items() if abs(c) > 1e-9}
+
+            if not combined:
+                return Const(0.0)
+
+            # Sort: variables first, constants last
+            sorted_terms = sorted(combined.items(), key=lambda item: isinstance(item[0], Const))
+
+            result = None
+            for term, coeff in sorted_terms:
+                sign = 1
+                if coeff < 0:
+                    sign = -1
+                    coeff = abs(coeff)
+
+                if isinstance(term, Const):
+                    val = sign * coeff * term.value
+                    term_node = Const(val)
+                elif abs(coeff - 1.0) < 1e-9:
+                    term_node = term
+                else:
+                    term_node = BinOp("*", Const(coeff), term)
+
+                if result is None:
+                    result = term_node if sign == 1 or isinstance(term_node, Const) else Neg(term_node)
+                else:
+                    if sign == -1:
+                        result = BinOp("-", result, term_node)
+                    else:
+                        result = BinOp("+", result, term_node)
+            return result
+
+        # 2. Constant folding
+        if isinstance(left, Const) and isinstance(right, Const):
+            try:
+                if node.op == "*": return Const(left.value * right.value)
+                if node.op == "/" and right.value != 0: return Const(left.value / right.value)
+                if node.op == "mod" and right.value != 0: return Const(left.value % right.value)
+                if node.op == "^":
+                    val = left.value ** right.value
+                    if isinstance(val, complex) or not math.isfinite(val): return BinOp(node.op, left, right)
+                    return Const(val)
+            except (OverflowError, ZeroDivisionError, ValueError):
+                pass
+
+        # 3. Pull division out of multiplication: (a / b) * c -> (a * c) / b
+        # This allows the multiplication rules below to combine the numerators.
+        if isinstance(left, BinOp) and left.op == "/":
+            return simplify(BinOp("/", BinOp("*", left.left, right), left.right), ops)
+        if isinstance(right, BinOp) and right.op == "/":
+            return simplify(BinOp("/", BinOp("*", left, right.left), right.right), ops)
+
+        # 4. Flatten and combine multiplications (n * 0.5 * n -> 0.5 * n^2)
+        if node.op == "*":
+            factors = _extract_factors(BinOp("*", left, right))
+            const_val = 1.0
+            term_counts = {}
+            
+            for f in factors:
+                if isinstance(f, Const):
+                    const_val *= f.value
+                else:
+                    term_counts[f] = term_counts.get(f, 0) + 1
+                    
+            if abs(const_val) < 1e-9:
+                return Const(0.0)
+                
+            res_factors = []
+            if abs(const_val - 1.0) > 1e-9 or not term_counts:
+                res_factors.append(Const(const_val))
+                
+            for term, count in term_counts.items():
+                if count == 1:
+                    res_factors.append(term)
+                elif "^" in ops:
+                    res_factors.append(BinOp("^", term, Const(float(count))))
+                else:
+                    # If ^ is disabled, just multiply the term by itself
+                    res_factors.extend([term] * count)
+                    
+            res = res_factors[0]
+            for f in res_factors[1:]:
+                res = BinOp("*", res, f)
+            return res
+        if node.op == "/":
+            if isinstance(right, Const) and right.value == 1: return left
+        if node.op == "^":
+            if isinstance(right, Const) and right.value == 1: return left
+            if isinstance(right, Const) and right.value == 0: return Const(1.0)
+
+        return BinOp(node.op, left, right)
+        
+    elif isinstance(node, UnOp):
+        child = simplify(node.child, ops)
+        if node.name == "abs" and isinstance(child, Const):
+            return Const(abs(child.value))
+        return UnOp(node.name, child)
+        
+    elif isinstance(node, Neg):
+        child = simplify(node.child, ops)
+        if isinstance(child, Const):
+            return Const(-child.value)
+        if isinstance(child, Neg):
+            return child.child
+        # Fold -1 * x into Neg(x) for cleaner rendering
+        if isinstance(child, BinOp) and child.op == "*" and isinstance(child.left, Const):
+            return BinOp("*", Const(-child.left.value), child.right)
+        if isinstance(child, BinOp) and child.op == "*" and isinstance(child.right, Const):
+            return BinOp("*", Const(-child.right.value), child.left)
+        return Neg(child)
+        
+    return node
+
+
 def _num_text(value: float) -> str:
     if abs(value - PI) < 1e-12:
         return "π"
@@ -109,7 +280,8 @@ def _num_text(value: float) -> str:
         return "e"
     if value == int(value) and abs(value) < 1e15:
         return str(int(value))
-    return repr(value)
+    # Round to 6 significant digits to avoid float artifacts (0.666666...)
+    return f"{value:.6g}"
 
 
 def to_text(node: Node) -> str:

@@ -133,18 +133,16 @@ def evaluate_all(node: Node, length: int) -> list[float] | None:
     invalidates the whole candidate."""
     try:
         fn = compile_node(node)
-    except ValueError:
-        return None  # unknown function name: corrupt AST, invalid formula
-    values = []
-    for i in range(1, length + 1):
-        try:
-            value = fn(i)
-        except (ZeroDivisionError, OverflowError, ValueError, TypeError):
-            return None
-        # A fractional power of a negative base returns complex, not an
-        # exception — check the type before isfinite, which raises on complex.
-        if isinstance(value, complex) or not math.isfinite(value) \
-                or abs(value) > BIG:
-            return None
-        values.append(value)
-    return values
+        # List comprehension is faster than a for-loop with append.
+        # Exception handling is wrapped around the whole block to avoid
+        # setup overhead on each iteration.
+        values = [fn(i) for i in range(1, length + 1)]
+        for value in values:
+            # A fractional power of a negative base returns complex, not an
+            # exception — check the type before isfinite, which raises on complex.
+            if isinstance(value, complex) or not math.isfinite(value) \
+                    or abs(value) > BIG:
+                return None
+        return values
+    except (ZeroDivisionError, OverflowError, ValueError, TypeError):
+        return None

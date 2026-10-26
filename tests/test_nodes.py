@@ -85,3 +85,25 @@ def test_from_dict_depth_cap():
 def test_frozen_immutability():
     with pytest.raises(Exception):
         Const(1.0).value = 2.0
+
+
+def test_simplify_division_in_multiplication():
+    from engine.nodes import simplify, to_text
+    # (n / 2) * n should become n^2 / 2
+    tree = B("*", B("/", VAR, C(2)), VAR)
+    simplified = simplify(tree)
+    text = to_text(simplified)
+    assert text in ("n ^ 2 / 2", "n^2 / 2", "1 / 2 * n ^ 2")
+    assert simplified.op == "/"
+    assert simplified.left.op == "^"
+
+
+def test_weighted_size_penalizes_large_constants():
+    from engine.nodes import weighted_size
+    small = B("*", C(2.0), VAR)          # 2*n
+    large = B("*", C(1000.0), VAR)       # 1000*n
+    assert weighted_size(small) == 3.0   # 1(op) + 1(const) + 1(n)
+    assert weighted_size(large) == 6.0   # 1(op) + 4(const) + 1(n)
+    # fractions stay primitive: no penalty for 0.5
+    half = B("*", C(0.5), VAR)
+    assert weighted_size(half) == 3.0

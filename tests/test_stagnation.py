@@ -18,9 +18,11 @@ def collect_func_names(node):
 
 def test_shock_fires_periodically_when_stuck():
     # 2^n is unsolvable without ^: the run grinds at an error floor and
-    # must keep shocking instead of circling the same formulas forever
+    # must keep shocking instead of circling the same formulas forever.
+    # Use a short window and duration so the test is fast and deterministic.
     eng = GPEngine([2, 4, 8, 16, 32, 64],
-                   GPConfig(seed=9, stagnation_window=5, shock_fraction=0.5,
+                   GPConfig(seed=9, stagnation_window=2, shock_fraction=0.5,
+                            shock_duration=2,
                             allowed_ops=("+", "-", "*", "/")))
     shocks = 0
     was_shocking = False

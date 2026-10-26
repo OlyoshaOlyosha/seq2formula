@@ -81,3 +81,12 @@ def test_half_integer_constants_appear():
     values = {n.value for t in trees for n in walk(t) if isinstance(n, Const)}
     assert any(v in (0.5, -0.5, 1.5, -1.5) for v in values)
     assert any(float(v).is_integer() for v in values)
+
+
+def test_large_constants_appear():
+    from engine.grammar import LARGE_CONSTS
+    rng = random.Random(42)
+    trees = initial_population(rng, 1000, 6)
+    values = {n.value for t in trees for n in walk(t) if isinstance(n, Const)}
+    assert any(abs(v) in set(LARGE_CONSTS) for v in values), \
+        "expected at least one large constant in 1000 trees"
