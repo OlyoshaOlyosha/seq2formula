@@ -6,7 +6,7 @@
 <title>seq2formula — поиск формулы</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 <body>
 <header class="topbar">
@@ -72,8 +72,8 @@
         </div>
         <label class="speed field-inline">
           <span class="field-label">Скорость</span>
-          <input type="range" id="speedRange" min="1" max="60" step="1" value="30">
-          <span class="num" id="speedValue">30 поколений/с</span>
+          <input type="range" id="speedRange" min="1" max="100" step="1" value="100">
+          <span class="num" id="speedValue">100 поколений/с</span>
         </label>
       </div>
       <div class="ops-row" id="opsRow" role="group" aria-label="Операции, доступные эволюции">
@@ -142,7 +142,7 @@
             <span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="kpiError">—</span></div>
           <div class="kpi" data-tip="Число узлов в дереве формулы (n, 2, +, ^ и т.д.); короче = проще, по нему выбирают чемпиона зала славы">
             <span class="kpi-label">Размер формулы</span><span class="kpi-value num" id="kpiSize">—</span></div>
-          <div class="kpi" data-tip="Доля формул в популяции, дающих разные значения; 100% — все разные, 0% — выродились в копии">
+          <div class="kpi" data-tip="Доля уникальных формул (и их абсолютное число); 100% — все разные, 0% — выродились в копии">
             <span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
           <div class="kpi" data-tip="Сколько формул эволюция успела проверить с начала прогона">
             <span class="kpi-label">Проверено формул</span><span class="kpi-value num" id="kpiEvaluated">—</span></div>
@@ -162,7 +162,11 @@
           <div class="chart" id="chartDiversity"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3 class="chart-title">Размеры деревьев</h3></div>
+          <div class="chart-head">
+            <h3 class="chart-title">Размеры деревьев</h3>
+            <p class="chart-note">Распределение формул по размеру: по горизонтали — число узлов,
+            по вертикали — сколько таких формул в популяции</p>
+          </div>
           <div class="chart" id="chartSizes"></div>
         </div>
         <div class="terms-card">
@@ -308,6 +312,6 @@
 
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>
