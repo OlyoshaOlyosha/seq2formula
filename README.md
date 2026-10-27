@@ -7,50 +7,35 @@
 ![Tests](https://img.shields.io/badge/tests-99%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
-seq2formula is a local experiment in symbolic regression: given a finite
-sequence of numbers, the system searches for a closed-form expression f(n)
-that generates it — `1 2 4 8 16` → `2^n`. The search currently runs as a
-genetic programming loop, with a reinforcement-learning engine planned on
-the same base; every generation is streamed live to a browser dashboard.
+**Watch evolution discover the mathematical formulas behind number sequences.**
+
+Have you ever looked at a sequence like `1 2 4 8 16` and wondered, *"What is the formula behind these numbers?"* 
+
+seq2formula answers this by running a genetic algorithm in your browser. It breeds, mutates, and crosses mathematical expressions, showing you the live search process. It feels less like a black-box calculator and more like watching a digital gardener grow an answer.
 
 ![seq2formula dashboard](docs/img/dashboard-search.png)
 
-The project is a long-running personal experiment rather than a finished
-product: the grammar, the engines and the dashboard are expected to evolve
-iteratively, and results — including trained models, once the neuro engine
-lands — are meant to be kept, compared and improved over time. Everything
-runs locally: a Python engine does the searching, a browser page does the
-showing, no network access is used or required.
+Everything runs locally on your machine. No internet access, no telemetry, and no external APIs. Just a Python engine doing the math and a sleek dashboard showing the show.
+
+## Features
+
+- **Live Search Dashboard**: Watch formulas evolve in real-time with detailed charts for fitness, error, and population diversity.
+- **Autopilot (Batch Mode)**: Queue up the entire library and let the engine solve puzzles one by one in the background.
+- **Advanced Math**: The engine supports basic arithmetic, roots, factorials, trigonometry (`sin`, `cos`), logarithms, and constants like π and e.
+- **65 Built-in Sequences**: A curated library of puzzles ranging from simple linear progressions to famous sequences like Fibonacci and Catalan numbers.
+- **Custom Sequences**: Input your own numbers, specify a reference formula, and watch the engine find it.
+- **Reproducibility**: Enter a "seed" number to replay the exact same evolutionary search, or leave it blank for a fresh random run.
 
 ## How it works
 
-- Candidate formulas are expression trees over a small grammar: `n`,
-  numeric constants (plus π and e), `+ - * / ^ %` (remainder), unary
-  minus, and functions — `sqrt`, cube root, factorial, `abs`, `sin`,
-  `cos`, `tan`, `ln`.
-- You choose which operators and functions the search may use — turn any
-  of them off and watch how (or whether) the evolution finds another
-  route. Basic operators are on by default; the advanced set is one click
-  away.
-- Fitness combines **accuracy** (a candidate is evaluated on n = 1..N; the
-  closer the values to the target sequence, the better) with **parsimony**
-  (shorter formulas win ties, which keeps solutions readable and prevents
-  oversized "technically correct" monsters).
-- Answers are validated by values, not by text: `n+n` and `2*n` count as
-  the same answer, and several different correct formulas for one sequence
-  is a normal outcome.
+- **Values over Text**: The engine doesn't care if it finds `2*n` or `n+n`. If the numbers match, the formula is correct.
+- **Parsimony Penalty**: Evolution naturally prefers shorter, more elegant formulas. Without this, it would just breed giant, unreadable monsters that happen to fit the numbers.
+- **Accuracy**: A formula is scored by testing it against your sequence (e.g., for `n = 1, 2, 3...`). The closer the output values are to your target, the higher the score.
 
 ## Dashboard
 
-The search is observable end to end: current best formula (rendered with
-KaTeX), a top-5 leaderboard of the current generation, a live event feed
-(new records, exact hits, formula shrinking), fitness and error dynamics
-per generation, population diversity, tree-size distribution, per-term
-error tables, a history of solved puzzles, a hall of fame of the shortest
-formulas, and a gallery of curious near-misses. A run can be paused,
-stepped through generation by generation, or accelerated at any time.
-An **Autopilot** mode can run through the entire puzzle library (65
-sequences) automatically, solving them one by one in the background.
+The dashboard is built to be watched. The live view shows the best current formula rendered in beautiful typography, a top-5 leaderboard, and a live event feed. A mini-chart plots the found formula directly against your target sequence. 
+The Results tab tracks your history, maintains a "Hall of Fame" of the shortest formulas ever found, and collects "Curiosities" (absurd, near-miss formulas). You can pause, step through generation-by-generation, or accelerate the search at any time.
 
 ## Getting started
 
