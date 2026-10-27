@@ -41,6 +41,7 @@ seq2formula отвечает на этот вопрос, запуская ген
 
 Требуется Python 3.10+.
 
+Для Windows:
 ```bat
 git clone https://github.com/OlyoshaOlyosha/seq2formula.git
 cd seq2formula
@@ -49,7 +50,15 @@ python -m venv .venv
 run.bat
 ```
 
-`run.bat` поднимает локальный сервер и открывает дашборд в браузере.
+Для Mac / Linux:
+```bash
+git clone https://github.com/OlyoshaOlyosha/seq2formula.git
+cd seq2formula
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+chmod +x run.sh
+./run.sh
 
 ## Статус и направления
 

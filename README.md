@@ -41,6 +41,7 @@ The Results tab tracks your history, maintains a "Hall of Fame" of the shortest 
 
 Requires Python 3.10+.
 
+On Windows:
 ```bat
 git clone https://github.com/OlyoshaOlyosha/seq2formula.git
 cd seq2formula
@@ -49,7 +50,18 @@ python -m venv .venv
 run.bat
 ```
 
-`run.bat` starts the local server and opens the dashboard in the browser.
+On Mac / Linux:
+```bash
+git clone https://github.com/OlyoshaOlyosha/seq2formula.git
+cd seq2formula
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+chmod +x run.sh
+./run.sh
+```
+
+The server will automatically find a free port (usually `http://127.0.0.1:8002`) and open your browser.
 
 ## Status and directions
 
