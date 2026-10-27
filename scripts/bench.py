@@ -2,17 +2,15 @@
 
 Measures pure engine throughput (no server, no browser, single process),
 so numbers are comparable across machines/commits regardless of how many
-dashboard tabs are open. Run:  python bench.py
-
-Each scenario runs a fixed number of generations on a fixed seed and
-reports mean ms/generation overall plus the first-vs-last split — the
-split exposes generation drift (tree bloat makes later generations
-slower; the optimizer's job is to keep the slope flat).
+dashboard tabs are open. Run:  python scripts/bench.py
 """
 
-from __future__ import annotations
-
+import sys
 import time
+from pathlib import Path
+
+# Add the project root to sys.path so we can import `engine`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine import GPConfig, GPEngine
 from engine.nodes import UNARY_FUNCS, size

@@ -1,26 +1,21 @@
 """Settings sweep: find GP parameters that solve more puzzles, faster.
 
-Runs the whole puzzle library at several parameter values (one axis at a
-time around the current defaults, a few seeds each) and reports per
-value: how many puzzles were solved within the generation budget and the
-median generations-to-solve. The output is the basis for updating
-DEFAULT_SETTINGS in app.py.
-
-Each puzzle runs with its own grammar: the basic five ops plus whatever
-the puzzle `requires` (so T4/T5 puzzles are attempted with the features
-they need, not cheated and not doomed).
-
 Usage:
-  python sweep.py                     # full sweep, ~10-15 min
-  python sweep.py --gens 300 --seeds 2
-  python sweep.py --axes p_mutate     # only one axis
+  python scripts/sweep.py                     # full sweep, ~10-15 min
+  python scripts/sweep.py --gens 300 --seeds 2
+  python scripts/sweep.py --axes p_mutate     # only one axis
 """
 
-from __future__ import annotations
-
 import argparse
+import json
 import statistics
+import sys
 import time
+from pathlib import Path
+
+# Add the project root to sys.path so we can import `engine`
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 from engine import GPConfig, GPEngine
 from engine.grammar import BINARY_OPS
@@ -28,7 +23,6 @@ from engine.nodes import UNARY_FUNCS, special_value
 
 BASIC_OPS = ("+", "-", "*", "/", "^")
 
-# One axis at a time around the current defaults (app.py DEFAULT_SETTINGS).
 AXES = {
     "parsimony": [0.001, 0.003, 0.01],
     "p_mutate": [0.15, 0.25, 0.4],
@@ -48,8 +42,7 @@ DEFAULTS = {
 
 
 def load_puzzles() -> list[dict]:
-    import json
-    with open("sequences.json", encoding="utf-8") as fh:
+    with open(ROOT / "sequences.json", encoding="utf-8") as fh:
         return json.load(fh)["puzzles"]
 
 

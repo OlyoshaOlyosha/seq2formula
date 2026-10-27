@@ -1,27 +1,17 @@
-"""Verify and expand sequences.json using explicit mathematical formulas.
-
-This script ensures that every `terms` array perfectly matches its
-`reference` formula. It also expands short sequences (4-6 terms) up to
-10 terms, stopping early if a value exceeds the engine's 1e9 limit.
-Longer sequences prevent the genetic algorithm from overfitting to a
-handful of points with a meaningless polynomial.
-
-Instead of duplicating the formulas in a separate dictionary, this
-script parses the human-readable `reference` string (e.g. "2^n + 1")
-directly into a mathematical AST and evaluates it.
-"""
+"""Verify and expand sequences.json using explicit mathematical formulas."""
 
 import json
 import math
 import re
+from pathlib import Path
+
+# Add the project root to sys.path so we can find `sequences.json`
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def parse_ref(text: str) -> tuple:
     """A tiny parser to convert the human-readable reference formula to an AST tuple."""
-    # Normalize symbols to match the tokenizer
     text = text.replace("π", " pi ").replace("·", " * ").replace("mod", " % ")
-    
-    # Tokenize: words (n, pi, sin...), decimals, integers, and operators
     tokens = re.findall(r'[a-zA-Z_]+|\d+\.\d+|\d+|[-+*/^%()!]', text)
     pos = 0
     
@@ -30,11 +20,11 @@ def parse_ref(text: str) -> tuple:
         
     def consume(expected=None):
         nonlocal pos
-        token = peek()
-        if expected and token != expected:
-            raise ValueError(f"Expected {expected}, got {token}")
+        tok = peek()
+        if expected and tok != expected:
+            raise ValueError(f"Expected {expected}, got {tok}")
         pos += 1
-        return token
+        return tok
     
     def parse_expr():
         left = parse_term()
@@ -149,7 +139,7 @@ def evaluate_ast(node: tuple, n: float) -> float:
 
 def verify_and_expand():
     print("Loading sequences.json...")
-    with open("sequences.json", encoding="utf-8") as f:
+    with open(ROOT / "sequences.json", encoding="utf-8") as f:
         data = json.load(f)
 
     errors = 0
@@ -170,14 +160,11 @@ def verify_and_expand():
 
         new_terms = []
         
-        # Calculate up to 10 terms, stopping if we hit the 1e9 limit
         for i in range(1, 11):
             try:
                 val = evaluate_ast(ast, i)
                 if abs(val) > 1e9:
                     break
-                
-                # Clean up float artifacts (e.g., 2.0000000000000004 -> 2.0)
                 if isinstance(val, float):
                     if val.is_integer():
                         val = int(val)
@@ -188,7 +175,6 @@ def verify_and_expand():
                 print(f"❌ Error evaluating {pid} at n={i}: {e}")
                 break
         
-        # Verify that the OLD terms in JSON were correct (up to their length)
         old_terms = p["terms"]
         for i, (t, e) in enumerate(zip(old_terms, new_terms, strict=False)):
             if abs(t - e) > 1e-5:
@@ -196,7 +182,6 @@ def verify_and_expand():
                 errors += 1
                 break
         
-        # Update the terms array only if it actually changed
         if old_terms != new_terms:
             p["terms"] = new_terms
             print(f"✅ {pid} updated to {len(new_terms)} terms")
@@ -205,7 +190,7 @@ def verify_and_expand():
             print(f"⏭️  {pid} unchanged ({len(new_terms)} terms)")
 
     if modified:
-        with open("sequences.json", "w", encoding="utf-8") as f:
+        with open(ROOT / "sequences.json", "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         print("\nDone! sequences.json updated.")
     else:
