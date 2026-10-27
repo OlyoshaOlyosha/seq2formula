@@ -12,12 +12,14 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import random
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -57,8 +59,12 @@ DEFAULT_SETTINGS = {
     "p_crossover": 1.0,       # sweep.py 2026-10-25: 40/41 puzzles vs 39
     "p_mutate": 0.25,
     "elitism": 2,
-    "shrink_generations": 120,
+    "shrink_generations": 0,
     "shrink_parsimony": 0.02,
+    "autopilot_gens": 500,
+    "notify_flash": True,
+    "notify_sound": True,
+    "notify_volume": 0.1,
 }
 
 
@@ -130,6 +136,20 @@ class RunRequest(BaseModel):
     speed: float = Field(default=DEFAULT_GPS, ge=0.5, le=240)
     ops: list[str] | None = None  # feature tokens (ops/funcs/consts); None = all
     reference: str | None = None  # user-provided reference formula
+    # empty = fresh random seed per run; an integer = deterministic replay
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+
+
+class AutopilotItem(BaseModel):
+    puzzle_id: str | None = None
+    terms: list[float] | None = None
+    reference: str | None = None
+
+
+class AutopilotRequest(BaseModel):
+    items: list[AutopilotItem]
+    gens: int = Field(ge=1, le=10000)
+    ops: list[str] | None = None
 
 
 class SettingsRequest(BaseModel):
@@ -144,6 +164,10 @@ class SettingsRequest(BaseModel):
     elitism: int = Field(ge=0, le=20)
     shrink_generations: int = Field(ge=0, le=2000)
     shrink_parsimony: float = Field(ge=0.0, le=0.2)
+    autopilot_gens: int = Field(ge=1, le=10000)
+    notify_flash: bool = True
+    notify_sound: bool = True
+    notify_volume: float = Field(ge=0.0, le=1.0)
 
 
 class ControlRequest(BaseModel):
@@ -171,6 +195,12 @@ class RunManager:
         self.continue_mode = False
         self.custom_reference: str | None = None
         self.clients: set[WebSocket] = set()
+        
+        # Autopilot queue state
+        self.is_autopilot = False
+        self.autopilot_queue: list[AutopilotItem] = []
+        self.autopilot_gens = 0
+        self.autopilot_ops = None
 
     # -- websocket plumbing ------------------------------------------------
 
@@ -193,7 +223,13 @@ class RunManager:
         allowed_ops, allowed_funcs, allowed_consts = \
             self._validate_grammar(request.ops)
         settings = load_settings()
+        # Always hand the engine a concrete integer seed: an empty request
+        # seed means "fresh random", and we want the value that was actually
+        # used stored in history so the run can be replayed later.
+        seed = (request.seed if request.seed is not None
+                else random.randrange(2**31))
         config = GPConfig(
+            seed=seed,
             population=(request.population if request.population is not None
                         else settings["population"]),
             parsimony=(request.parsimony if request.parsimony is not None
@@ -216,7 +252,9 @@ class RunManager:
         self.status = "running"
         self.delay = 1.0 / request.speed
         self.step_once = False
-        self.continue_mode = False
+        # In autopilot mode, continue_mode is forced on so we don't stop
+        # on a solution until the generation budget is exhausted.
+        self.continue_mode = self.is_autopilot
         self.started_at = time.perf_counter()
         self.solved_wall_time = None
         self.puzzle = puzzle
@@ -226,6 +264,7 @@ class RunManager:
         self.custom_reference = request.reference
         # remembered so the history entry can show how the run was tuned
         self.config_summary = {
+            "seed": config.seed,
             "population": config.population,
             "parsimony": config.parsimony,
             "p_mutate": config.p_mutate,
@@ -298,17 +337,45 @@ class RunManager:
             self.status = "paused"
             self.step_once = True
         elif action == "stop":
+            self.is_autopilot = False
+            self.autopilot_queue.clear()
             self.stop(reason="stopped_by_user")
             return self.snapshot()
         return self.snapshot()
+
+    def start_autopilot(self, req: AutopilotRequest) -> dict:
+        self.is_autopilot = True
+        self.autopilot_queue = list(req.items)
+        self.autopilot_gens = req.gens
+        self.autopilot_ops = req.ops
+        return self._next_autopilot_run()
+
+    def _next_autopilot_run(self) -> dict:
+        if not self.autopilot_queue:
+            self.is_autopilot = False
+            self.status = "finished"
+            self.finish_reason = "autopilot_done"
+            return self.snapshot()
+
+        item = self.autopilot_queue.pop(0)
+        req = RunRequest(
+            puzzle_id=item.puzzle_id,
+            terms=item.terms,
+            reference=item.reference,
+            ops=self.autopilot_ops,
+            speed=240, # max speed for autopilot
+            max_generations=self.autopilot_gens,
+        )
+        return self.start(req)
 
     def _save_custom_best(self) -> None:
         """Save the current best formula to history even if unsolved."""
         if not self.engine or not self.engine.best_ever or not self.terms:
             return
         best = self.engine.best_ever
-        # Only save if it's better than a random guess (e.g. error < 20%)
-        if best.score.error > 0.2:
+        
+        # Save any progress that isn't complete garbage (error < 99%)
+        if best.score.error > 0.99:
             return
 
         entry = {
@@ -326,14 +393,18 @@ class RunManager:
             "time_s": round(time.perf_counter() - self.started_at, 3),
             "settings": self.config_summary,
             "reference": self.custom_reference,
+            "seed": self.engine.cfg.seed,
             "solved": False,
         }
         history = _load_json(HISTORY_FILE, [])
-        # Don't save if we already have a better (or equal) unsolved entry
+        
+        # Don't save if we already have a better (lower error) unsolved entry
         existing = [h for h in history if h["seq_key"] == entry["seq_key"] and not h["solved"]]
-        if existing and existing[-1]["size"] <= entry["size"]:
-            return
-            
+        if existing:
+            min_error = min(h.get("error", 1.0) for h in existing)
+            if entry["error"] >= min_error:
+                return
+
         history.append(entry)
         _save_json(HISTORY_FILE, history[-HISTORY_CAP:])
 
@@ -353,6 +424,7 @@ class RunManager:
         return {
             "type": "status",
             "status": self.status,
+            "seed": self.engine.cfg.seed if self.engine else None,
             "sequence": self.terms,
             "puzzle": ({k: self.puzzle[k] for k in ("id", "tier", "name")}
                        if self.puzzle else None),
@@ -362,6 +434,8 @@ class RunManager:
             "best": self.last_gen["best"] if self.last_gen else None,
             "solved": bool(self.engine and self.engine.solved),
             "finish_reason": self.finish_reason,
+            "last_gen": self.last_gen,
+            "is_autopilot": self.is_autopilot,
         }
 
     # -- the paced loop ------------------------------------------------------
@@ -397,6 +471,9 @@ class RunManager:
                     if self.engine.done and not self.continue_mode:
                         await self._finalize()
                         return
+                    if self.continue_mode and self.is_autopilot and self.engine.generation >= self.autopilot_gens:
+                        await self._finalize()
+                        return
                 else:
                     next_gen = None
                     await asyncio.sleep(0.05)
@@ -405,9 +482,12 @@ class RunManager:
 
     async def _finalize(self) -> None:
         """Persist the finished run and announce the outcome."""
-        assert self.engine is not None
+        if self.engine is None:
+            return
         solved = self.engine.solved
         entry = None
+        
+        is_autopilot = self.is_autopilot
         
         if not solved:
             self._save_custom_best()
@@ -428,6 +508,7 @@ class RunManager:
                                 (time.perf_counter() - self.started_at), 3),
                 "settings": self.config_summary,
                 "reference": self.custom_reference,
+                "seed": self.engine.cfg.seed,
                 "solved": True,
             }
             history = _load_json(HISTORY_FILE, [])
@@ -437,9 +518,33 @@ class RunManager:
         self.status = "finished"
         self.finish_reason = ("solved" if solved else
                               self.finish_reason or "max_generations")
+        
+        # Autopilot: broadcast the current finish, then immediately start the next.
+        if is_autopilot and self.autopilot_queue:
+            await self.broadcast({
+                "type": "solved" if solved else "finished",
+                "reason": self.finish_reason,
+                "formula": entry["formula_ast"] if entry else None,
+                "formula_text": entry["formula"] if entry else None,
+                "size": entry["size"] if entry else None,
+                "generations": entry["generations"] if entry else self.engine.generation,
+                "time_s": entry["time_s"] if entry else None,
+                "hall_entry": entry,
+                "shortest_text": (to_text(self.engine.shortest_exact.node)
+                                  if self.engine.shortest_exact else None),
+                "is_autopilot": True,
+            })
+            # Start the next one in the background
+            asyncio.get_running_loop().create_task(self._run_next_autopilot())
+            return
+
+        # Normal finish (or autopilot queue exhausted)
+        if not self.autopilot_queue:
+            self.is_autopilot = False
+            
         await self.broadcast({
             "type": "solved" if solved else "finished",
-            "reason": self.finish_reason,
+            "reason": self.finish_reason if not is_autopilot else "autopilot_done",
             "formula": entry["formula_ast"] if entry else None,
             "formula_text": entry["formula"] if entry else None,
             "size": entry["size"] if entry else None,
@@ -448,7 +553,15 @@ class RunManager:
             "hall_entry": entry,
             "shortest_text": (to_text(self.engine.shortest_exact.node)
                               if self.engine.shortest_exact else None),
+            "is_autopilot": self.is_autopilot,
         })
+
+    async def _run_next_autopilot(self) -> None:
+        await asyncio.sleep(0.5)  # brief pause so the client can process the finish
+        if not self.is_autopilot:
+            return
+        snapshot = self._next_autopilot_run()
+        await self.broadcast(snapshot)
 
     def _save_curiosities(self) -> None:
         """Merge this run's best almost-correct monsters into the gallery."""
@@ -482,11 +595,80 @@ manager = RunManager()
 # REST API
 # --------------------------------------------------------------------------
 
+def calc_ref_size(text: str) -> float:
+    """Port of the JS reference size calculator to guarantee matching weights."""
+    if not text:
+        return 0.0
+    formatted = text.lower()
+    formatted = formatted.replace("√", " sqrt ").replace("∛", " cbrt ")
+    formatted = formatted.replace("π", " pi ").replace("!", " ! ")
+    formatted = re.sub(r'(\d)([a-z(])', r'\1 * \2', formatted)
+    formatted = re.sub(r'(\))([a-z0-9(])', r'\1 * \2', formatted)
+
+    tokens = re.findall(r'(sqrt|cbrt|fact|abs|sin|cos|tan|ln|pi|e|\d+(?:\.\d+)?|n|[-+*/^%()!])', formatted)
+
+    size = 0.0
+    for t in tokens:
+        if t in ("(", ")"):
+            continue
+        if t in ["sqrt", "cbrt", "fact", "abs", "sin", "cos", "tan", "ln", "!", "%", "mod"]:
+            size += 2.0
+        elif t in ["+", "-", "*", "/", "^"]:
+            size += 1.0
+        elif t in ["n", "pi", "e"]:
+            size += 1.0
+        elif re.match(r'^\d+(\.\d+)?$', t):
+            num = float(t)
+            if num < 1:
+                size += 1.0
+            else:
+                size += float(len(str(int(abs(num)))))
+    return size
+
+
 @app.get("/api/puzzles")
 def get_puzzles() -> dict:
     # Reference formulas are shown up front: single-user local toy, the
     # owner wants the target answer visible while watching the search.
-    return {"puzzles": load_puzzles()}
+    history = _load_json(HISTORY_FILE, [])
+    puzzles = load_puzzles()
+    
+    # Calculate the best generation count per puzzle from history
+    best_gens = {}
+    for e in history:
+        if e.get("solved"):
+            key = e["seq_key"]
+            if key not in best_gens or e["generations"] < best_gens[key]:
+                best_gens[key] = e["generations"]
+
+    # Find dynamic percentiles for relative difficulty
+    solved_counts = sorted(best_gens.values())
+    easy_threshold, medium_threshold = None, None
+    if len(solved_counts) >= 3:
+        easy_threshold = solved_counts[len(solved_counts) // 3]
+        medium_threshold = solved_counts[(len(solved_counts) * 2) // 3]
+
+    for p in puzzles:
+        ref = p.get("reference", "")
+        p["ref_size"] = calc_ref_size(ref)
+        
+        # Attach difficulty badge relative to the user's own history
+        key = _seq_key([float(t) for t in p["terms"]])
+        if key in best_gens and easy_threshold is not None:
+            gens = best_gens[key]
+            if gens <= easy_threshold:
+                p["difficulty"] = "easy"
+            elif gens <= medium_threshold:
+                p["difficulty"] = "medium"
+            else:
+                p["difficulty"] = "hard"
+        elif key in best_gens:
+            # Not enough data for percentiles yet, but it is solved
+            p["difficulty"] = "medium"
+        else:
+            p["difficulty"] = "unseen"
+
+    return {"puzzles": puzzles}
 
 
 @app.get("/api/stats")
@@ -526,7 +708,7 @@ def get_stats() -> dict:
     clean = [{k: e[k] for k in ("puzzle", "sequence", "formula",
                                 "generations", "time_s", "size")}
              for e in records]
-    for r, e in zip(clean, records):
+    for r, e in zip(clean, records, strict=True):
         # how many solved attempts this sequence has in the history
         r["attempts"] = sum(1 for h in history
                             if h.get("solved") and h["seq_key"] == e["seq_key"])
@@ -563,6 +745,13 @@ def post_settings(request: SettingsRequest) -> dict:
 @app.get("/api/status")
 def get_status() -> dict:
     return manager.snapshot()
+
+
+@app.post("/api/autopilot")
+async def post_autopilot(request: AutopilotRequest) -> dict:
+    snapshot = manager.start_autopilot(request)
+    asyncio.get_running_loop().create_task(manager.broadcast(snapshot))
+    return snapshot
 
 
 @app.post("/api/run")

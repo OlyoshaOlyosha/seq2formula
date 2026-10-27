@@ -28,6 +28,7 @@ const state = {
   lastLogGen: null,        // throttle the event feed
   wasShocking: false,      // dedupe shock entries in the race log
   pendingPuzzleRestore: "", // remembered puzzle id, applied once the library loads
+  isAutopilot: false,      // is the autopilot queue currently running
 };
 
 /* ---------- formatting ---------- */
@@ -358,6 +359,7 @@ function setChip(text, cls) {
 }
 
 function setStatus(status) {
+  if (status === "running") stopTitleFlash();
   state.status = status;
   const running = status === "running" || status === "paused" || status === "finished";
   $("liveEmpty").hidden = running;
@@ -593,11 +595,21 @@ function renderRaceLog() {
 
 function updateRaceLog(msg) {
   state.lastGenNum = msg.gen;
+  // a stuck run shocks every stagnation window. Instead of hiding them
+  // entirely, coalesce: if the newest entry is already a shock, just
+  // update its generation. This keeps the feed clean and leaves room
+  // for formulas, while still showing that the engine is alive.
   if (msg.shock && !state.wasShocking) {
-    pushLogEntry({
-      pre: "встряска: подмешаны свежие формулы",
-      cls: "log-shock",
-    });
+    const top = state.raceLog[0];
+    if (top && top.cls === "log-shock") {
+      top.gen = msg.gen;
+      renderRaceLog();
+    } else {
+      pushLogEntry({
+        pre: "встряска: подмешаны свежие формулы",
+        cls: "log-shock",
+      });
+    }
   }
   state.wasShocking = msg.shock;
   if (msg.solved_now) {
@@ -675,6 +687,15 @@ function applySolved(msg) {
   setStatus("finished");
   setChip("решено", "solved");
   $("resultsDot").hidden = false;
+  
+  if (state.settings) {
+    if (state.settings.notify_sound && state.settings.notify_volume > 0) {
+      playSolvedSound(state.settings.notify_volume);
+    }
+    if (state.settings.notify_flash) {
+      startTitleFlash();
+    }
+  }
   pushLogEntry({
     pre: "решено:", latex: msg.formula ? astToLatex(msg.formula) : null,
     text: `${msg.generations} поколений, ${fmtTime(msg.time_s)}`,
@@ -710,13 +731,73 @@ function applySolved(msg) {
 function applyStatusMsg(msg) {
   setStatus(msg.status);
   if ("solved" in msg) state.lastRunSolved = msg.solved === true;
+  
+  // Detect if autopilot moved to a new sequence and clear the charts
+  const seqStr = msg.sequence ? msg.sequence.join(",") : "";
+  const oldSeqStr = state.puzzleTerms ? state.puzzleTerms.join(",") : "";
+  const seqChanged = msg.sequence && state.puzzleTerms && seqStr !== oldSeqStr;
+
+  if (seqChanged) {
+    resetBuffers();
+    state.runStartedAt = performance.now();
+    $("termsEmpty").hidden = true;
+  }
+
   if (msg.sequence && msg.sequence.length) {
+    // Sync the UI inputs when the sequence changes or on first load
+    if (seqChanged || (!state.puzzleTerms && msg.puzzle)) {
+      $("seqInput").value = msg.sequence.join(" ");
+      if (msg.puzzle) {
+        $("puzzleSelect").value = msg.puzzle.id;
+        const p = PUZZLE_CACHE.find((x) => x.id === msg.puzzle.id);
+        if (p) $("refInput").value = p.reference || "";
+      } else {
+        $("puzzleSelect").value = "";
+      }
+      updatePuzzleLabel();
+      updateOpsHint();
+      
+      // Keep localStorage in sync so a page reload restores the current task
+      localStorage.setItem("seq2formula_seq", $("seqInput").value);
+      localStorage.setItem("seq2formula_ref", $("refInput").value);
+      localStorage.setItem("seq2formula_puzzle", msg.puzzle ? msg.puzzle.id : "");
+    }
     state.puzzleTerms = msg.sequence;
   }
   if (msg.puzzle) {
     state.puzzle = msg.puzzle;
     const p = PUZZLE_CACHE.find((x) => x.id === msg.puzzle.id);
     if (p) markPuzzle(p);
+  }
+  
+  // If we connected mid-run, the server sent the last generation data.
+  // Apply it immediately so the UI isn't empty waiting for the next tick.
+  if (msg.last_gen && (!state.lastGenNum || msg.last_gen.gen >= state.lastGenNum)) {
+    applyGen(msg.last_gen);
+  }
+
+  // Update autopilot state and button
+  if ("is_autopilot" in msg) {
+    state.isAutopilot = msg.is_autopilot;
+    const btn = $("autopilotBtn");
+    if (state.isAutopilot) {
+      btn.classList.remove("btn-positive");
+      btn.classList.add("btn-danger");
+      btn.textContent = "Остановить автопилот";
+    } else {
+      btn.classList.add("btn-positive");
+      btn.classList.remove("btn-danger");
+      btn.textContent = "Автопилот";
+    }
+  }
+
+  // Highlight the currently running sequence in the tables
+  highlightActiveRow();
+  
+  // A run started while the pane was hidden leaves charts with 0 width.
+  // Force a resize after the browser has laid out the newly unhidden grid.
+  if (msg.status === "running") {
+    setTimeout(resizeCharts, 10);
   }
 }
 
@@ -737,9 +818,20 @@ function connectWS() {
       case "gen": applyGen(msg); break;
       case "solved": applySolved(msg); break;
       case "finished":
-        setStatus("finished");
-        setChip(msg.reason === "max_generations" ? "лимит поколений" : "остановлено", "finished");
-        refreshAll();
+        if (msg.autopilot_next) {
+          refreshAll();
+        } else {
+          setStatus("finished");
+          setChip(msg.reason === "autopilot_done" ? "автопилот завершен" : "остановлено", "finished");
+          if (msg.is_autopilot === false) {
+            state.isAutopilot = false;
+            const btn = $("autopilotBtn");
+            btn.classList.add("btn-positive");
+            btn.classList.remove("btn-danger");
+            btn.textContent = "Автопилот";
+          }
+          refreshAll();
+        }
         break;
     }
   };
@@ -772,28 +864,114 @@ async function loadPuzzles() {
   const data = await api("/api/puzzles");
   PUZZLE_CACHE = data.puzzles;
   const select = $("puzzleSelect");
-  const keep = select.value;  // refreshAll() rebuilds the list after every
-  select.innerHTML = "";      // solve — the selection must survive it
+  const menu = $("puzzleSelectMenu");
+  const keep = select.value;
+  
+  select.innerHTML = "";
+  menu.innerHTML = "";
+  
+  // Re-create the search input and filters because menu.innerHTML = "" wiped them.
+  const searchWrap = document.createElement("div");
+  searchWrap.className = "puzzle-search-wrap";
+  searchWrap.innerHTML = `
+    <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Поиск последовательности...">
+    <div class="puzzle-filters">
+      <select id="filterStatus" class="input puzzle-filter-select">
+        <option value="all">Все</option>
+        <option value="unsolved">Нерешённые</option>
+        <option value="solved">Решённые</option>
+      </select>
+      <select id="filterDiff" class="input puzzle-filter-select">
+        <option value="all" style="color: var(--text)">⚪ Любая</option>
+        <option value="easy" style="color: var(--positive)">🟢 Легко</option>
+        <option value="medium" style="color: var(--amber)">🟡 Средне</option>
+        <option value="hard" style="color: var(--negative)">🔴 Сложно</option>
+      </select>
+    </div>
+  `;
+  menu.appendChild(searchWrap);
+
   const own = document.createElement("option");
   own.value = "";
   own.textContent = "— своя последовательность —";
   select.appendChild(own);
+  
   const tiers = { 1: "T1 · линейные", 2: "T2 · степени", 3: "T3 · смешанные",
                   4: "T4 · новые операции", 5: "T5 · очень сложные" };
+                  
   for (const tier of [1, 2, 3, 4, 5]) {
     const group = document.createElement("optgroup");
     group.label = tiers[tier];
+    select.appendChild(group);
+    
+    const menuGroup = document.createElement("div");
+    menuGroup.className = "modern-select-group";
+    menuGroup.textContent = tiers[tier];
+    menu.appendChild(menuGroup);
+    
     for (const p of PUZZLE_CACHE.filter((x) => x.tier === tier)) {
+      // 1. Hidden native option
       const opt = document.createElement("option");
       opt.value = p.id;
       opt.textContent = `${p.name} · ${p.terms.slice(0, 4).join(" ")}…`;
       group.appendChild(opt);
+      
+      // 2. Custom visual item
+      const item = document.createElement("div");
+      item.className = "modern-select-item";
+      item.dataset.id = p.id;
+      // "unseen" means never solved. Anything else means at least one solve.
+      item.dataset.solved = (p.difficulty && p.difficulty !== "unseen") ? "true" : "false";
+      item.dataset.diff = p.difficulty || "unseen";
+      if (p.id === keep) item.classList.add("active");
+      
+      const info = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "modern-select-item-name";
+      const dot = document.createElement("span");
+      dot.className = `diff-dot ${p.difficulty || "unseen"}`;
+      name.appendChild(dot);
+      name.appendChild(document.createTextNode(p.name));
+      
+      const desc = document.createElement("div");
+      desc.className = "modern-select-item-desc";
+      const seq = document.createElement("span");
+      seq.className = "modern-select-item-seq";
+      seq.textContent = p.terms.slice(0, 4).join(" ") + (p.terms.length > 4 ? "…" : "");
+      desc.appendChild(seq);
+      
+      if (p.reference) {
+        const ref = document.createElement("span");
+        ref.className = "modern-select-item-ref";
+        renderKatex(ref, refToLatex(p.reference), false);
+        desc.appendChild(ref);
+      }
+      
+      info.appendChild(name);
+      info.appendChild(desc);
+      item.appendChild(info);
+      
+      item.addEventListener("click", () => {
+        select.value = p.id;
+        select.dispatchEvent(new Event("change"));
+        togglePuzzleMenu(false);
+      });
+      
+      menu.appendChild(item);
     }
-    select.appendChild(group);
   }
+  
+  // Setup search and filter listeners
+  $("puzzleSearch").value = "";
+  $("puzzleSearch").addEventListener("input", applyPuzzleFilters);
+  $("filterStatus").addEventListener("change", applyPuzzleFilters);
+  $("filterDiff").addEventListener("change", applyPuzzleFilters);
+  $("puzzleSearch").addEventListener("click", (e) => e.stopPropagation());
+  $("filterStatus").addEventListener("click", (e) => e.stopPropagation());
+  $("filterDiff").addEventListener("click", (e) => e.stopPropagation());
+
   select.value = keep;
-  // First page load only: apply the remembered puzzle from a previous
-  // session. Later calls preserve the current choice through `keep`.
+  // First page load only: apply the remembered puzzle from a previous session.
   if (state.pendingPuzzleRestore && !select.value) {
     const p = PUZZLE_CACHE.find((x) => x.id === state.pendingPuzzleRestore);
     if (p) {
@@ -803,7 +981,66 @@ async function loadPuzzles() {
     }
     state.pendingPuzzleRestore = "";
   }
+  updatePuzzleLabel();
   updateOpsHint();
+}
+
+function applyPuzzleFilters() {
+  const q = $("puzzleSearch").value.toLowerCase().trim();
+  const status = $("filterStatus").value;
+  const diff = $("filterDiff").value;
+
+  document.querySelectorAll(".modern-select-item").forEach(item => {
+    const text = item.textContent.toLowerCase();
+    const isSolved = item.dataset.solved === "true";
+    const itemDiff = item.dataset.diff;
+
+    let match = text.includes(q);
+    if (status === "solved" && !isSolved) match = false;
+    if (status === "unsolved" && isSolved) match = false;
+    if (diff !== "all" && itemDiff !== diff) match = false;
+
+    item.style.display = match ? "" : "none";
+  });
+
+  // Hide tier groups that have no visible items
+  document.querySelectorAll(".modern-select-group").forEach(group => {
+    let hasVisible = false;
+    let next = group.nextElementSibling;
+    while (next && !next.classList.contains("modern-select-group")) {
+      if (next.style.display !== "none") hasVisible = true;
+      next = next.nextElementSibling;
+    }
+    group.style.display = hasVisible ? "" : "none";
+  });
+}
+
+function togglePuzzleMenu(show) {
+  const menu = $("puzzleSelectMenu");
+  const btn = $("puzzleSelectTrigger");
+  const isHidden = menu.hidden;
+  const shouldShow = show !== undefined ? show : isHidden;
+  menu.hidden = !shouldShow;
+  btn.setAttribute("aria-expanded", shouldShow);
+  if (shouldShow) {
+    const active = menu.querySelector(".modern-select-item.active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function updatePuzzleLabel() {
+  const val = $("puzzleSelect").value;
+  const label = $("puzzleSelectLabel");
+  if (!val) {
+    label.textContent = "— своя последовательность —";
+    $("puzzleSelectMenu").querySelectorAll(".modern-select-item").forEach(el => el.classList.remove("active"));
+  } else {
+    const p = PUZZLE_CACHE.find(x => x.id === val);
+    label.textContent = p ? p.name : "— своя последовательность —";
+    $("puzzleSelectMenu").querySelectorAll(".modern-select-item").forEach(el => {
+      el.classList.toggle("active", el.dataset.id === val);
+    });
+  }
 }
 
 const TOKEN_LABELS = {
@@ -823,42 +1060,13 @@ function updateOpsHint() {
     el.hidden = true;
     return;
   }
-  el.textContent = `для загадки «${p.name}» требуются: ` +
+  el.textContent = `для «${p.name}» требуются: ` +
     missing.map((t) => TOKEN_LABELS[t] || t).join(", ") +
     " (сейчас отключены)";
   el.hidden = false;
 }
 
-function calcWeightedSize(text) {
-  // Insert explicit '*' for implicit multiplication (e.g. 2n -> 2 * n)
-  const formatted = text.toLowerCase()
-    .replace(/√/g, " sqrt ").replace(/∛/g, " cbrt ")
-    .replace(/π/g, " pi ").replace(/!/g, " ! ")
-    .replace(/(\d)([a-z(])/g, "$1 * $2")
-    .replace(/(\))([a-z0-9(])/g, "$1 * $2");
-
-  const tokens = formatted.match(/(sqrt|cbrt|fact|abs|sin|cos|tan|ln|pi|e|\d+(\.\d+)?|n|[-+*/^%()!])/g) || [];
-  
-  let size = 0;
-  for (const t of tokens) {
-    if (t === "(" || t === ")") continue;
-    if (["sqrt", "cbrt", "fact", "abs", "sin", "cos", "tan", "ln", "!", "%", "mod"].includes(t)) {
-      size += 2;
-    } else if (["+", "-", "*", "/", "^"].includes(t)) {
-      size += 1;
-    } else if (["n", "pi", "e"].includes(t)) {
-      size += 1;
-    } else if (/^\d+(\.\d+)?$/.test(t)) {
-      // 1000 -> 4, 10 -> 2, 0.5 -> 1 (primitives stay 1)
-      const num = parseFloat(t);
-      if (num < 1) size += 1;
-      else size += String(Math.floor(Math.abs(num))).length;
-    }
-  }
-  return size;
-}
-
-function renderReferenceNote(text) {
+function renderReferenceNote(text, size) {
   const note = $("solvedNote");
   note.classList.add("show");
   note.innerHTML = "";
@@ -869,14 +1077,15 @@ function renderReferenceNote(text) {
   renderKatex(ref, refToLatex(text), false);
   note.appendChild(ref);
   
-  const size = calcWeightedSize(text);
-  const meta = document.createElement("span");
-  meta.style.marginLeft = "12px";
-  meta.style.color = "var(--muted)";
-  meta.style.fontSize = "12px";
-  meta.title = "Точный размер формулы (с учётом сложности знаков и разрядности чисел).";
-  meta.textContent = `(размер ${size})`;
-  note.appendChild(meta);
+  if (size !== undefined && size !== null) {
+    const meta = document.createElement("span");
+    meta.style.marginLeft = "12px";
+    meta.style.color = "var(--muted)";
+    meta.style.fontSize = "12px";
+    meta.title = "Точный размер формулы (с учётом сложности знаков и разрядности чисел).";
+    meta.textContent = `(размер ${size})`;
+    note.appendChild(meta);
+  }
 }
 
 function clearReferenceNote() {
@@ -889,7 +1098,7 @@ function markPuzzle(p) {
   state.puzzle = p;
   state.puzzleTerms = p ? p.terms.map(Number) : null;
   if (!p) { clearReferenceNote(); return; }
-  if (p.reference) renderReferenceNote(p.reference);
+  if (p.reference) renderReferenceNote(p.reference, p.ref_size);
 }
 
 async function loadLibrary() {
@@ -899,23 +1108,38 @@ async function loadLibrary() {
   const rows = $("libraryRows");
   rows.innerHTML = "";
 
-  // Group best attempts by sequence
+  // Group best attempts by sequence.
+  // Priority: solved > unsolved. Among solved: shortest formula wins.
+  // Among unsolved: lowest error (or smallest size) wins.
   const best = {};
   for (const h of history) {
     const key = h.sequence.join(",");
-    if (!best[key] || h.solved || (!best[key].solved && h.size < best[key].size)) {
+    if (!best[key]) {
       best[key] = h;
+    } else {
+      const current = best[key];
+      if (h.solved && !current.solved) {
+        best[key] = h;
+      } else if (h.solved && current.solved) {
+        if (h.size < current.size) best[key] = h;
+      } else if (!h.solved && !current.solved) {
+        if (h.error < current.error) best[key] = h;
+      }
     }
   }
 
   for (const p of puzzles.puzzles) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Запустить поиск этой загадки";
+    tr.title = "Запустить поиск этой последовательности";
     tr.addEventListener("click", () => {
       $("puzzleSelect").value = p.id;
       $("seqInput").value = p.terms.join(" ");
-      $("refInput").value = "";
+      $("refInput").value = p.reference || "";
+      // pre-fill the seed from the best attempt, so replaying this run
+      // is one click away; old entries have no seed and stay empty
+      $("seedInput").value = h && h.seed !== null && h.seed !== undefined
+        ? String(h.seed) : "";
       markPuzzle(p);
       updateOpsHint();
       $("ptabSearch").click();
@@ -923,9 +1147,23 @@ async function loadLibrary() {
 
     const key = p.terms.join(",");
     const h = best[key];
+    tr.dataset.seq = key;
+    tr.dataset.id = p.id;
+    tr.dataset.terms = JSON.stringify(p.terms);
+    tr.dataset.ref = p.reference || "";
+    tr.dataset.diff = p.difficulty || "unseen";
+    tr.dataset.solved = h && h.solved ? "true" : "false";
+
+    // Store plain text for the search filter (KaTeX renders math as spans,
+    // making textContent useless for matching "2^n").
+    tr.dataset.search = (p.name + " " + p.terms.join(" ") + " " + (p.reference || "") + " " + (h && h.formula ? h.formula : "")).toLowerCase();
 
     const title = document.createElement("td");
-    title.innerHTML = `<b>${p.name}</b><br><span style="color:var(--faint);font-size:12px">${p.terms.join(" ")}</span>`;
+    const dot = document.createElement("span");
+    dot.className = `diff-dot ${p.difficulty || "unseen"}`;
+    dot.title = p.difficulty === "easy" ? "Легко" : p.difficulty === "medium" ? "Средне" : p.difficulty === "hard" ? "Сложно" : "Ещё не решено";
+    title.appendChild(dot);
+    title.innerHTML += `<b>${p.name}</b><br><span style="color:var(--faint);font-size:12px; margin-left: 14px;">${p.terms.join(" ")}</span>`;
     tr.appendChild(title);
 
     const ref = document.createElement("td");
@@ -938,10 +1176,16 @@ async function loadLibrary() {
       else result.textContent = h.formula;
       result.className = h.solved ? "solved-text" : "amber-text";
       
-      const refSize = calcWeightedSize(p.reference || "");
+      const refSize = p.ref_size || 0;
       if (h.solved && h.size < refSize) {
         tr.classList.add("better-than-ref");
         result.title = `Найдена формула короче эталона! (Размер ${h.size} против ${refSize})`;
+        
+        const badge = document.createElement("span");
+        badge.className = "ref-badge";
+        badge.textContent = " ★";
+        badge.title = `Короче эталона (${h.size} против ${refSize})`;
+        result.appendChild(badge);
       }
       
       bindPlotHover(tr, () => [h.sequence, h.values]);
@@ -950,6 +1194,17 @@ async function loadLibrary() {
       result.style.color = "var(--faint)";
     }
     tr.appendChild(result);
+
+    const err = document.createElement("td");
+    err.className = "num";
+    if (h) {
+      if (h.solved) err.textContent = "0%";
+      else err.textContent = fmtPercent(h.error);
+      err.className = h.solved ? "num solved-text" : "num amber-text";
+    } else {
+      err.textContent = "—";
+    }
+    tr.appendChild(err);
 
     const gens = document.createElement("td");
     gens.className = "num";
@@ -978,13 +1233,23 @@ async function loadMySeqs() {
   const rows = $("mySeqRows");
   rows.innerHTML = "";
 
-  // Keep only custom sequences, group by sequence
+  // Keep only custom sequences, group by sequence.
+  // Priority: solved > unsolved. Among solved: shortest formula wins.
   const custom = data.history.filter(h => !h.puzzle);
   const best = {};
   for (const h of custom) {
     const key = h.sequence.join(",");
-    if (!best[key] || h.solved || (!best[key].solved && h.size < best[key].size)) {
+    if (!best[key]) {
       best[key] = h;
+    } else {
+      const current = best[key];
+      if (h.solved && !current.solved) {
+        best[key] = h;
+      } else if (h.solved && current.solved) {
+        if (h.size < current.size) best[key] = h;
+      } else if (!h.solved && !current.solved) {
+        if (h.error < current.error) best[key] = h;
+      }
     }
   }
 
@@ -1006,15 +1271,23 @@ async function loadMySeqs() {
   for (const h of unique) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
+    tr.dataset.seq = h.sequence.join(",");
+    tr.dataset.terms = JSON.stringify(h.sequence);
+    tr.dataset.ref = h.reference || "";
+    tr.dataset.solved = h.solved ? "true" : "false";
     tr.title = "Запустить поиск заново";
     tr.addEventListener("click", () => {
       $("seqInput").value = h.sequence.join(" ");
       $("refInput").value = h.reference || "";
+      $("seedInput").value = h.seed !== null && h.seed !== undefined
+        ? String(h.seed) : "";
       $("puzzleSelect").value = "";
       markPuzzle(null);
       updateOpsHint();
       $("ptabSearch").click();
     });
+
+    tr.dataset.search = (h.sequence.map(fmtNum).join(" ") + " " + (h.reference || "") + " " + h.formula + " " + (h.solved ? "0%" : fmtPercent(h.error))).toLowerCase();
 
     const seq = document.createElement("td");
     seq.className = "seq";
@@ -1084,6 +1357,8 @@ async function loadCuriosities() {
       updateOpsHint();
       $("ptabSearch").click();
     });
+    tr.dataset.search = (c.sequence.map(fmtNum).join(" ") + " " + c.formula_text + " " + c.size + " " + c.error + " " + (c.gen + 1)).toLowerCase();
+
     addCell(tr, "td", c.sequence.map(fmtNum).join(" "), "seq");
     const f = addCell(tr, "td", "");
     if (c.formula_ast) renderKatex(f, astToLatex(c.formula_ast), false);
@@ -1096,12 +1371,57 @@ async function loadCuriosities() {
   }
 }
 
+function highlightActiveRow() {
+  document.querySelectorAll("tbody tr").forEach(tr => tr.classList.remove("active-autopilot"));
+  if (state.status === "running" && state.puzzleTerms) {
+    const seqKey = state.puzzleTerms.join(",");
+    document.querySelectorAll(`tbody tr[data-seq="${seqKey}"]`).forEach(row => {
+      row.classList.add("active-autopilot");
+    });
+  }
+}
+
+function applyTableFilter() {
+  const val = $("tableFilter").value;
+  const isLibrary = !$("libraryTable").hidden;
+  const table = isLibrary ? $("libraryTable") : $("mySeqTable");
+  const rows = table.querySelectorAll("tbody tr");
+  if (!rows.length || rows[0].children.length === 1) return;
+
+  rows.forEach(tr => {
+    // Never hide the row that is currently being processed by the autopilot,
+    // so the user can see it even if it just got solved and doesn't match
+    // the "Unsolved" filter anymore.
+    if (tr.classList.contains("active-autopilot")) {
+      tr.style.display = "";
+      return;
+    }
+
+    const isSolved = tr.dataset.solved === "true";
+    const diff = tr.dataset.diff || "unseen";
+    let show = true;
+
+    if (val === "unsolved" && isSolved) show = false;
+    if (val === "solved" && !isSolved) show = false;
+    if (val === "easy" && diff !== "easy") show = false;
+    if (val === "medium" && diff !== "medium") show = false;
+    if (val === "hard" && diff !== "hard") show = false;
+
+    tr.style.display = show ? "" : "none";
+  });
+}
+
 function refreshAll() {
-  loadPuzzles().catch(() => {});
-  loadLibrary().catch(() => {});
-  loadMySeqs().catch(() => {});
-  loadCuriosities().catch(() => {});
-  loadStats().catch(() => {});
+  Promise.all([
+    loadPuzzles().catch(() => {}),
+    loadLibrary().catch(() => {}),
+    loadMySeqs().catch(() => {}),
+    loadCuriosities().catch(() => {}),
+    loadStats().catch(() => {})
+  ]).then(() => {
+    applyTableFilter();
+    highlightActiveRow();
+  });
 }
 
 /* Library summary: solved fraction, per-tier aggregates, records. */
@@ -1111,15 +1431,14 @@ async function loadStats() {
   const data = await api("/api/stats");
   const headline = $("statsHeadline");
   const tiers = $("statsTiers");
-  const records = $("statsRecords");
-  headline.textContent = `Решено ${data.solved} из ${data.total} загадок`;
+  headline.textContent = `Решено ${data.solved} из ${data.total} последовательностей`;
   tiers.innerHTML = "";
   for (const t of data.by_tier) {
     const cell = document.createElement("div");
     cell.className = "stats-tier" + (t.solved === t.total ? " done" : "");
     cell.dataset.tip = t.solved === t.total
-      ? "Все загадки уровня решены"
-      : `Решено ${t.solved} из ${t.total} загадок этого уровня`;
+      ? "Все последовательности уровня решены"
+      : `Решено ${t.solved} из ${t.total} последовательностей этого уровня`;
     const name = document.createElement("span");
     name.className = "stats-tier-name";
     name.textContent = TIER_LABELS[t.tier] || `T${t.tier}`;
@@ -1131,20 +1450,6 @@ async function loadStats() {
     gens.textContent = t.avg_gens !== null ? `⌀ ${t.avg_gens} пок.` : "—";
     cell.append(name, frac, gens);
     tiers.appendChild(cell);
-  }
-  records.innerHTML = "";
-  for (const r of data.records) {
-    const row = document.createElement("div");
-    row.className = "stats-record";
-    const who = document.createElement("span");
-    who.textContent = r.attempts > 1
-      ? `${r.puzzle} · ${r.attempts} попыток`
-      : r.puzzle;
-    const val = document.createElement("span");
-    val.className = "num";
-    val.textContent = `${r.generations} пок. · ${fmtTime(r.time_s)}`;
-    row.append(who, val);
-    records.appendChild(row);
   }
 }
 
@@ -1163,24 +1468,45 @@ async function startRun(event) {
   event.preventDefault();
   $("solvedNote").classList.remove("show");
   state.lastRunSolved = false;
+  stopTitleFlash();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   
   if (state.ops.size === 0) {
     alertErr("не выбрана ни одна операция");
     return;
   }
   
+  // Empty seed = fresh random run on the server; any integer = deterministic.
+  // The field is digits-only (see the input listener in bindControls), so
+  // this guard only catches a hand-edited DOM value.
+  const seedRaw = $("seedInput").value.trim();
+  let seed = null;
+  if (seedRaw !== "") {
+    seed = Number(seedRaw);
+    if (!Number.isInteger(seed) || seed < 0) {
+      alertErr("seed должен быть целым неотрицательным числом");
+      return;
+    }
+  }
   const puzzleId = $("puzzleSelect").value || null;
   let body;
   if (puzzleId) {
     body = { puzzle_id: puzzleId, speed: Number($("speedRange").value),
-             ops: [...state.ops] };
+             ops: [...state.ops], seed };
   } else {
     let terms;
     try { terms = parseTerms($("seqInput").value); }
     catch (e) { alertErr(e.message); return; }
     const customRef = $("refInput").value.trim();
-    body = { terms, speed: Number($("speedRange").value), ops: [...state.ops], reference: customRef || null };
+    body = { terms, speed: Number($("speedRange").value), ops: [...state.ops], reference: customRef || null, seed };
   }
+
+  // visual loading state to prevent double-clicks while API is in flight
+  const startBtn = $("startBtn");
+  const originalText = startBtn.innerHTML;
+  startBtn.disabled = true;
+  startBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Запуск...';
+
   try {
     const status = await api("/api/run", body);
     resetBuffers();
@@ -1192,7 +1518,9 @@ async function startRun(event) {
       if (p) markPuzzle(p);
     } else {
       const customRef = $("refInput").value.trim();
-      if (customRef) renderReferenceNote(customRef);
+      // We don't have the pre-calculated size for custom refs,
+      // so we just omit the size parameter.
+      if (customRef) renderReferenceNote(customRef, null);
       else clearReferenceNote();
     }
     $("termsEmpty").hidden = true;
@@ -1200,6 +1528,9 @@ async function startRun(event) {
     scheduleChartUpdate();
   } catch (e) {
     alertErr("не удалось запустить: " + e.message);
+  } finally {
+    startBtn.innerHTML = originalText;
+    startBtn.disabled = state.status === "running" || state.status === "paused";
   }
 }
 
@@ -1210,7 +1541,21 @@ function alertErr(message) {
 }
 
 async function control(action) {
-  try { await api("/api/control", { action }); }
+  try {
+    await api("/api/control", { action });
+    if (action === "stop") {
+      state.isAutopilot = false;
+      const btn = $("autopilotBtn");
+      btn.classList.add("btn-positive");
+      btn.classList.remove("btn-danger");
+      btn.textContent = "Автопилот";
+    }
+    // The server saves the best unsolved formula on pause. Refresh the
+    // tables immediately so the user sees the progress without waiting.
+    if (action === "pause") {
+      refreshAll();
+    }
+  }
   catch (e) { alertErr(e.message); }
 }
 
@@ -1242,25 +1587,29 @@ async function copyBestFormula() {
 }
 
 const RESULT_META = {
-  library: "все загадки из библиотеки: эталон и лучший найденный результат (зелёный — решено, оранжевый — пока только приближение)",
-  myseqs: "введённые вами последовательности, лучшие найденные формулы и ошибки",
-  curio: "почти правильные, но громоздкие монстры — следы блуждания эволюции",
+  library: "Все последовательности из библиотеки: эталон и лучший найденный результат (зелёный — решено, оранжевый — пока только приближение)",
+  myseqs: "Введённые вами последовательности, лучшие найденные формулы и ошибки",
+  curio: "Почти правильные, но громоздкие монстры — следы блуждания эволюции",
 };
 
 /* ---------- settings (Настройки tab) ---------- */
 
 const SETTING_FIELDS = [
-  ["setPopulation", "population"],
-  ["setMaxGenerations", "max_generations"],
-  ["setSpeedMax", "speed_max"],
-  ["setParsimony", "parsimony"],
-  ["setMaxDepth", "max_depth"],
-  ["setTournament", "tournament"],
-  ["setPCrossover", "p_crossover"],
-  ["setPMutate", "p_mutate"],
-  ["setElitism", "elitism"],
-  ["setShrinkGenerations", "shrink_generations"],
-  ["setShrinkParsimony", "shrink_parsimony"],
+  ["setPopulation", "population", "number"],
+  ["setMaxGenerations", "max_generations", "number"],
+  ["setSpeedMax", "speed_max", "number"],
+  ["setParsimony", "parsimony", "number"],
+  ["setMaxDepth", "max_depth", "number"],
+  ["setTournament", "tournament", "number"],
+  ["setPCrossover", "p_crossover", "number"],
+  ["setPMutate", "p_mutate", "number"],
+  ["setElitism", "elitism", "number"],
+  ["setShrinkGenerations", "shrink_generations", "number"],
+  ["setShrinkParsimony", "shrink_parsimony", "number"],
+  ["setAutopilotGens", "autopilot_gens", "number"],
+  ["setNotifyFlash", "notify_flash", "checkbox"],
+  ["setNotifySound", "notify_sound", "checkbox"],
+  ["setNotifyVolume", "notify_volume", "range"],
 ];
 
 async function loadSettings() {
@@ -1273,9 +1622,15 @@ async function loadSettings() {
 
 function fillSettingsForm() {
   if (!state.settings) return;
-  for (const [id, key] of SETTING_FIELDS) {
-    $(id).value = String(state.settings[key]);
+  for (const [id, key, type] of SETTING_FIELDS) {
+    if (type === "checkbox") {
+      $(id).checked = Boolean(state.settings[key]);
+    } else {
+      $(id).value = String(state.settings[key]);
+    }
   }
+  // update the numeric label next to the volume slider
+  $("setNotifyVolumeVal").textContent = state.settings.notify_volume;
 }
 
 /* the speed slider's upper bound is a setting; keep the slider honest */
@@ -1294,7 +1649,13 @@ function applySpeedMax() {
 async function saveSettings(event) {
   if (event) event.preventDefault();
   const body = {};
-  for (const [id, key] of SETTING_FIELDS) body[key] = Number($(id).value);
+  for (const [id, key, type] of SETTING_FIELDS) {
+    if (type === "checkbox") {
+      body[key] = $(id).checked;
+    } else {
+      body[key] = Number($(id).value);
+    }
+  }
   try {
     const data = await api("/api/settings", body);
     state.settings = data.settings;
@@ -1351,6 +1712,9 @@ function initFromUrlAndStorage() {
   // link is a stronger intent than the last keystroke.
   const savedSeq = localStorage.getItem("seq2formula_seq");
   if (savedSeq) $("seqInput").value = savedSeq;
+  const savedSeed = localStorage.getItem("seq2formula_seed");
+  // stored values from before this fix may contain non-digits — sanitize
+  if (savedSeed !== null) $("seedInput").value = savedSeed.replace(/\D/g, "");
   const savedRef = localStorage.getItem("seq2formula_ref");
   if (savedRef) $("refInput").value = savedRef;
 
@@ -1387,30 +1751,135 @@ function initFromUrlAndStorage() {
   });
 }
 
+/* ---------- notifications (sound + title flash) ---------- */
+
+let audioCtx = null;
+function playSolvedSound(volume) {
+  if (!window.AudioContext && !window.webkitAudioContext) return;
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+
+  // The user liked the "rising" chime, so we bring it back but with a very
+  // soft envelope and a non-linear gain curve. 1.0 is ~0.3 max gain (quiet),
+  // 0.1 is ~0.003 (barely audible whisper).
+  const maxGain = Math.pow(volume, 2) * 0.3;
+  if (maxGain < 0.0001) return;
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+  osc.frequency.exponentialRampToValueAtTime(1318.51, audioCtx.currentTime + 0.15); // E6
+
+  gain.gain.setValueAtTime(0, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(maxGain, audioCtx.currentTime + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.6);
+
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.6);
+}
+
+let titleFlashTimer = null;
+function startTitleFlash() {
+  if (titleFlashTimer) return;
+  const original = document.title;
+  let flash = false;
+  titleFlashTimer = setInterval(() => {
+    document.title = flash ? original : "✅ Решено! — seq2formula";
+    flash = !flash;
+  }, 1000);
+}
+
+function stopTitleFlash() {
+  if (titleFlashTimer) {
+    clearInterval(titleFlashTimer);
+    titleFlashTimer = null;
+    document.title = "seq2formula — поиск формулы";
+  }
+}
+
+/* Keyboard shortcuts for the live controls. Skipped when focus is in an
+   editable element or a button, so typing and Space-activating a button
+   both keep working. */
+function bindHotkeys() {
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = (document.activeElement || {}).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+        || tag === "BUTTON") return;
+
+    if (e.code === "Space") {
+      if (state.status !== "running" && state.status !== "paused") return;
+      e.preventDefault();
+      control(state.status === "paused" ? "resume" : "pause");
+    } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      if (state.status === "finished") return;
+      e.preventDefault();
+      control("step");
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      const slider = $("speedRange");
+      const step = e.key === "ArrowUp" ? 5 : -5;
+      const next = Math.max(Number(slider.min),
+                            Math.min(Number(slider.max), Number(slider.value) + step));
+      slider.value = String(next);
+      $("speedValue").textContent = next + " поколений/с";
+      setSpeed(next);
+      e.preventDefault();
+    } else if (e.key === "Escape") {
+      if (state.status !== "running" && state.status !== "paused") return;
+      e.preventDefault();
+      control("stop");
+    }
+  });
+}
+
 function bindControls() {
   initFromUrlAndStorage();
   
   $("runForm").addEventListener("submit", startRun);
   $("seqInput").addEventListener("input", () => {
     $("puzzleSelect").value = "";
+    updatePuzzleLabel();
     localStorage.setItem("seq2formula_puzzle", "");
     markPuzzle(null);
     localStorage.setItem("seq2formula_seq", $("seqInput").value);
   });
+  
+  $("puzzleSelectTrigger").addEventListener("click", (e) => {
+    e.stopPropagation();
+    togglePuzzleMenu();
+  });
+  
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".field-puzzle")) {
+      togglePuzzleMenu(false);
+    }
+  });
   $("refInput").addEventListener("input", () => {
     localStorage.setItem("seq2formula_ref", $("refInput").value);
+  });
+  // digits-only: strip anything else on every input (typing, paste, IME).
+  // This is what stops letters from becoming an empty (="random") value.
+  $("seedInput").addEventListener("input", (e) => {
+    const cleaned = e.target.value.replace(/\D/g, "");
+    if (cleaned !== e.target.value) e.target.value = cleaned;
+    localStorage.setItem("seq2formula_seed", cleaned);
   });
   $("puzzleSelect").addEventListener("change", (e) => {
     const p = PUZZLE_CACHE.find((x) => x.id === e.target.value);
     if (p) {
       $("seqInput").value = p.terms.join(" ");
-      $("refInput").value = p.reference || "";  // populate the reference field
-      // keep the persisted state in sync with what's on screen now
+      $("refInput").value = p.reference || "";
       localStorage.setItem("seq2formula_seq", $("seqInput").value);
       localStorage.setItem("seq2formula_ref", $("refInput").value);
     }
     localStorage.setItem("seq2formula_puzzle", e.target.value);
     markPuzzle(p || null);
+    updatePuzzleLabel();
     updateOpsHint();
   });
   $("pauseBtn").addEventListener("click", () => {
@@ -1443,6 +1912,15 @@ function bindControls() {
         $(b).hidden = t !== tabId;
       }
       $("resultsMeta").textContent = RESULT_META[metaKey];
+      // reset the text search, but keep the dropdown filter
+      $("tableSearch").value = "";
+      // re-apply filter to the newly visible table
+      applyTableFilter();
+      // Ensure text search is cleared visually
+      const activeTable = tabs.find(([t]) => t === tabId)[1];
+      document.querySelectorAll(`#${activeTable} tbody tr`).forEach(tr => {
+        if (tr.dataset.search) tr.style.display = ""; 
+      });
     });
   }
   $("resultsMeta").textContent = RESULT_META.library;
@@ -1458,7 +1936,7 @@ function bindControls() {
       }
       if (tabId === "ptabResults") {
         $("resultsDot").hidden = true;
-        resizeCharts();
+        setTimeout(resizeCharts, 50); // delay helps uPlot get the right container width
       }
     });
   }
@@ -1466,6 +1944,15 @@ function bindControls() {
   // settings form: save / reset, slider upper bound follows speed_max
   $("settingsForm").addEventListener("submit", saveSettings);
   $("settingsReset").addEventListener("click", resetSettings);
+  
+  // Auto-save notification toggles so the user doesn't have to click "Save"
+  $("setNotifyFlash").addEventListener("change", saveSettings);
+  $("setNotifySound").addEventListener("change", saveSettings);
+  // Volume slider: update label live, save on release
+  $("setNotifyVolume").addEventListener("input", (e) => {
+    $("setNotifyVolumeVal").textContent = e.target.value;
+  });
+  $("setNotifyVolume").addEventListener("change", saveSettings);
 
   // operator picker: toggle chips, block a run without any operator
   const syncOpsDisabled = () => {
@@ -1474,6 +1961,35 @@ function bindControls() {
       chip.disabled = busy;
     });
   };
+  const syncOpsUI = () => {
+    document.querySelectorAll(".op-chip").forEach(chip => {
+      chip.setAttribute("aria-pressed", String(state.ops.has(chip.dataset.op)));
+    });
+    localStorage.setItem("seq2formula_ops", JSON.stringify([...state.ops]));
+    updateOpsHint();
+  };
+
+  document.querySelectorAll(".clickable-group").forEach(label => {
+    label.addEventListener("click", () => {
+      if (state.status === "running" || state.status === "paused") return;
+      const group = label.closest(".ops-group");
+      const chips = Array.from(group.querySelectorAll(".op-chip"));
+      const allEnabled = chips.every(c => state.ops.has(c.dataset.op));
+      
+      chips.forEach(chip => {
+        const op = chip.dataset.op;
+        if (allEnabled) {
+          // If we are disabling all, ensure at least one op remains globally
+          if (state.ops.size === 1 && state.ops.has(op)) return;
+          state.ops.delete(op);
+        } else {
+          state.ops.add(op);
+        }
+      });
+      syncOpsUI();
+    });
+  });
+
   document.querySelectorAll(".op-chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       const op = chip.dataset.op;
@@ -1484,12 +2000,126 @@ function bindControls() {
       }
       const on = !state.ops.has(op);
       state.ops[on ? "add" : "delete"](op);
-      chip.setAttribute("aria-pressed", String(on));
-      localStorage.setItem("seq2formula_ops", JSON.stringify([...state.ops]));
-      updateOpsHint();
+      syncOpsUI();
     });
   });
   syncOpsDisabled();
+
+  // table search: hide rows that don't match the query
+  $("tableSearch").addEventListener("input", (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    document.querySelectorAll(".tab-body table:not([hidden]) tbody tr").forEach(tr => {
+      // Prefer the raw text we stored in data-search (KaTeX breaks textContent)
+      const text = tr.dataset.search || tr.textContent.toLowerCase();
+      tr.style.display = text.includes(q) ? "" : "none";
+    });
+  });
+
+  $("tableFilter").addEventListener("change", applyTableFilter);
+
+  // autopilot trigger
+  $("autopilotBtn").addEventListener("click", async () => {
+    if (state.isAutopilot) {
+      // Act as a stop button
+      control("stop");
+      return;
+    }
+
+    const isLibrary = !$("libraryTable").hidden;
+    const table = isLibrary ? $("libraryTable") : $("mySeqTable");
+    
+    // Grab only the VISIBLE rows, in their current DOM order
+    const rows = Array.from(table.querySelectorAll("tbody tr")).filter(tr => tr.style.display !== "none");
+    
+    if (!rows.length || rows[0].children.length === 1) return;
+
+    const items = rows.map(tr => {
+      const isLib = !!tr.dataset.id;
+      return {
+        puzzle_id: isLib ? tr.dataset.id : null,
+        terms: tr.dataset.terms ? JSON.parse(tr.dataset.terms) : null,
+        reference: tr.dataset.ref || null
+      };
+    });
+
+    const gens = state.settings.autopilot_gens;
+    
+    try {
+      await api("/api/autopilot", { items, gens, ops: [...state.ops] });
+    } catch (err) {
+      alertErr("не удалось запустить автопилот: " + err.message);
+    }
+  });
+
+  // export history as JSON
+  $("exportBtn").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/history");
+      const blob = new Blob([JSON.stringify(data.history, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `seq2formula_history_${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alertErr("не удалось скачать историю: " + err.message);
+    }
+  });
+
+  // column sorting: reorders the DOM rows based on text or numeric value
+  document.querySelectorAll(".tab-body table th").forEach((th) => {
+    th.addEventListener("click", () => {
+      const table = th.closest("table");
+      const tbody = table.querySelector("tbody");
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      if (rows.length <= 1 || rows[0].children.length === 1) return;
+
+      // cellIndex is the column position relative to the current table,
+      // unlike the cumulative index across all tables
+      const index = th.cellIndex;
+      const isAsc = th.dataset.sort !== "asc";
+      
+      // reset other headers in this table
+      table.querySelectorAll("th").forEach(other => {
+        if (other !== th) delete other.dataset.sort;
+      });
+      th.dataset.sort = isAsc ? "asc" : "desc";
+
+      rows.sort((a, b) => {
+        const aCell = a.children[index];
+        const bCell = b.children[index];
+        if (!aCell || !bCell) return 0;
+
+        // Sort by raw dataset text if available, otherwise fallback to textContent
+        let aText, bText;
+        if (th.classList.contains("num")) {
+          aText = aCell.textContent.trim();
+          bText = bCell.textContent.trim();
+        } else {
+          // For non-numeric columns, localeCompare handles Cyrillic fine
+          aText = aCell.textContent.trim();
+          bText = bCell.textContent.trim();
+        }
+
+        const aNum = parseFloat(aText.replace(/[^\d.-]/g, ''));
+        const bNum = parseFloat(bText.replace(/[^\d.-]/g, ''));
+        
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return isAsc ? aNum - bNum : bNum - aNum;
+        }
+        return isAsc ? aText.localeCompare(bText) : bText.localeCompare(aText);
+      });
+
+      // Hide tbody to skip layout recalculation during DOM manipulation.
+      // Re-rendering heavy KaTeX DOM trees on every row move freezes the UI.
+      tbody.style.display = "none";
+      tbody.replaceChildren(...rows);
+      tbody.style.display = "";
+    });
+  });
+
+  bindHotkeys();
 
   // re-fit charts when any chart container changes size (viewport
   // changes and pane switches); window resize alone misses both

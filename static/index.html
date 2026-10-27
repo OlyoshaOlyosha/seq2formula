@@ -39,13 +39,24 @@
                  aria-describedby="seqHint">
           <span class="field-hint" id="seqHint">2–32 числа через пробел или запятую</span>
         </label>
-        <label class="field field-puzzle">
-          <span class="field-label">Или загадка из библиотеки</span>
-          <select id="puzzleSelect" class="input" aria-label="Загадка из библиотеки">
+        <div class="field field-puzzle">
+          <span class="field-label">Или последовательность из библиотеки</span>
+          <!-- Hidden native select: keeps backward compatibility with the existing JS logic -->
+          <select id="puzzleSelect" style="display: none;">
             <option value="">— своя последовательность —</option>
           </select>
-          <span class="field-hint">41 загадка, пять уровней сложности</span>
-        </label>
+          <!-- Custom UI for the dropdown -->
+          <button type="button" class="input modern-select-trigger" id="puzzleSelectTrigger" aria-haspopup="listbox" aria-expanded="false">
+            <span id="puzzleSelectLabel">— своя последовательность —</span>
+            <svg class="modern-select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="modern-select-menu" id="puzzleSelectMenu" role="listbox" hidden>
+            <div class="puzzle-search-wrap">
+              <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Поиск последовательности...">
+            </div>
+          </div>
+          <span class="field-hint">65 последовательностей, пять уровней сложности</span>
+        </div>
         <label class="field field-ref">
           <span class="field-label">Эталонная формула (необязательно)</span>
           <input id="refInput" class="input" type="text"
@@ -77,6 +88,13 @@
             Искать ещё
           </button>
         </div>
+        <label class="seed field-inline">
+          <span class="field-label">Seed</span>
+          <input type="text" id="seedInput" class="input seed-field"
+                 inputmode="numeric" pattern="[0-9]*" maxlength="10"
+                 placeholder="случайный" autocomplete="off"
+                 title="Пусто — новый случайный сид на каждый прогон; число — воспроизводимый прогон с тем же результатом">
+        </label>
         <label class="speed field-inline">
           <span class="field-label">Скорость</span>
           <input type="range" id="speedRange" min="1" max="100" step="1" value="100">
@@ -89,7 +107,7 @@
         </span>
         <div class="ops-groups">
           <div class="ops-group">
-            <span class="ops-group-name">Базовые</span>
+            <span class="ops-group-name clickable-group" id="groupBasic" role="button" tabindex="0" title="Включить/выключить все базовые">Базовые</span>
             <div class="op-chips">
               <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
               <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
@@ -99,7 +117,7 @@
             </div>
           </div>
           <div class="ops-group">
-            <span class="ops-group-name">Расширенные</span>
+            <span class="ops-group-name clickable-group" id="groupAdvanced" role="button" tabindex="0" title="Включить/выключить все расширенные">Расширенные</span>
             <div class="op-chips">
               <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="квадратный корень">√</button>
               <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="кубический корень">∛</button>
@@ -218,19 +236,37 @@
       <div class="stats-card" id="statsCard" aria-label="Сводка по библиотеке">
         <div class="stats-top">
           <span class="stats-headline" id="statsHeadline">—</span>
-          <span class="panel-meta">решено / рекорды по тирам</span>
         </div>
         <div class="stats-tiers" id="statsTiers"></div>
-        <div class="stats-records" id="statsRecords"></div>
       </div>
-      <div class="tabs" role="tablist" aria-label="Результаты">
-        <button class="tab" role="tab" id="tabLibrary" aria-selected="true">Библиотека</button>
-        <button class="tab" role="tab" id="tabMySeqs" aria-selected="false">Мои последовательности</button>
-        <button class="tab" role="tab" id="tabCurio" aria-selected="false">Курьёзы</button>
+      <div class="results-controls">
+        <div class="tabs" role="tablist" aria-label="Результаты">
+          <button class="tab" role="tab" id="tabLibrary" aria-selected="true">Библиотека</button>
+          <button class="tab" role="tab" id="tabMySeqs" aria-selected="false">Мои последовательности</button>
+          <button class="tab" role="tab" id="tabCurio" aria-selected="false">Курьёзы</button>
+        </div>
+        <div class="table-tools">
+          <select id="tableFilter" class="input table-search" style="width: 160px;" title="Фильтр отображаемых строк (влияет на Автопилот)">
+            <option value="all">Все</option>
+            <option value="unsolved">Нерешённые</option>
+            <option value="solved">Решённые</option>
+            <option value="easy">Только лёгкие</option>
+            <option value="medium">Только средние</option>
+            <option value="hard">Только сложные</option>
+          </select>
+          <button class="btn btn-positive" id="autopilotBtn" title="Запустить поиск для всех видимых строк в текущем порядке">
+            Автопилот
+          </button>
+          <input type="search" id="tableSearch" class="input table-search" placeholder="Поиск по таблице...">
+          <button class="btn" id="exportBtn" title="Скачать всю историю прогонов (все вкладки) в формате JSON">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Экспорт истории
+          </button>
+        </div>
       </div>
       <div class="tab-body" id="tabBody">
         <table class="list-table" id="libraryTable">
-          <thead><tr><th>Загадка</th><th>Эталон</th><th>Лучший результат</th><th class="num">Поколений</th></tr></thead>
+          <thead><tr><th>Последовательность</th><th>Эталон</th><th>Лучший результат</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
           <tbody id="libraryRows"></tbody>
         </table>
         <table class="list-table" id="mySeqTable" hidden>
@@ -252,79 +288,103 @@
         <h2 class="panel-title">Настройки</h2>
         <span class="panel-meta" id="settingsMeta">применяются к следующим запускам, хранятся локально</span>
       </div>
-      <form id="settingsForm" class="settings-grid">
-        <label class="field">
-          <span class="field-label">Популяция</span>
-          <input class="input" type="number" id="setPopulation" min="20" max="2000" step="1">
-          <span class="field-hint">20–2000 формул в поколении</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Максимум поколений</span>
-          <input class="input" type="number" id="setMaxGenerations" min="10" max="100000" step="1">
-          <span class="field-hint">10–100000; нерешённый прогон закончится ровно на этом числе</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Максимальная скорость</span>
-          <input class="input" type="number" id="setSpeedMax" min="10" max="240" step="1">
-          <span class="field-hint">поколений/с, верхняя граница ползунка (до 240)</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Штраф за размер</span>
-          <input class="input" type="number" id="setParsimony" min="0" max="0.1" step="0.001">
-          <span class="field-hint">0–0.1; выше — короче формулы, но медленнее сходимость</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Глубина деревьев</span>
-          <input class="input" type="number" id="setMaxDepth" min="3" max="12" step="1">
-          <span class="field-hint">3–12 узлов в самой длинной ветке</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Размер турнира</span>
-          <input class="input" type="number" id="setTournament" min="2" max="16" step="1">
-          <span class="field-hint">2–16; сколько случайных формул борются за отбор</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Вероятность кроссовера</span>
-          <input class="input" type="number" id="setPCrossover" min="0" max="1" step="0.05">
-          <span class="field-hint">0–1; доля потомков от скрещивания пар</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Вероятность мутации</span>
-          <input class="input" type="number" id="setPMutate" min="0" max="1" step="0.05">
-          <span class="field-hint">0–1; доля потомков с мутацией</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Элита</span>
-          <input class="input" type="number" id="setElitism" min="0" max="20" step="1">
-          <span class="field-hint">0–20; сколько лучших переходят в следующее поколение без изменений</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Поколений усадки</span>
-          <input class="input" type="number" id="setShrinkGenerations" min="0" max="2000" step="1">
-          <span class="field-hint">сколько искать формулу короче после решения</span>
-        </label>
-        <label class="field">
-          <span class="field-label">Штраф усадки</span>
-          <input class="input" type="number" id="setShrinkParsimony" min="0" max="0.2" step="0.005">
-          <span class="field-hint">штраф за размер во время усадки (обычно сильно больше основного)</span>
-        </label>
+      <form id="settingsForm" class="settings-form">
+        <h3 class="settings-section-title">Параметры поиска</h3>
+        <div class="settings-grid">
+          <label class="field">
+            <span class="field-label">Популяция</span>
+            <input class="input" type="number" id="setPopulation" min="20" max="2000" step="1">
+            <span class="field-hint">20–2000 формул в поколении</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Максимум поколений</span>
+            <input class="input" type="number" id="setMaxGenerations" min="10" max="100000" step="1">
+            <span class="field-hint">10–100000; нерешённый прогон закончится ровно на этом числе</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Максимальная скорость</span>
+            <input class="input" type="number" id="setSpeedMax" min="10" max="240" step="1">
+            <span class="field-hint">поколений/с, верхняя граница ползунка (до 240)</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Штраф за размер</span>
+            <input class="input" type="number" id="setParsimony" min="0" max="0.1" step="0.001">
+            <span class="field-hint">0–0.1; выше — короче формулы, но медленнее сходимость</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Глубина деревьев</span>
+            <input class="input" type="number" id="setMaxDepth" min="3" max="12" step="1">
+            <span class="field-hint">3–12 узлов в самой длинной ветке</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Размер турнира</span>
+            <input class="input" type="number" id="setTournament" min="2" max="16" step="1">
+            <span class="field-hint">2–16; сколько случайных формул борются за отбор</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Вероятность кроссовера</span>
+            <input class="input" type="number" id="setPCrossover" min="0" max="1" step="0.05">
+            <span class="field-hint">0–1; доля потомков от скрещивания пар</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Вероятность мутации</span>
+            <input class="input" type="number" id="setPMutate" min="0" max="1" step="0.05">
+            <span class="field-hint">0–1; доля потомков с мутацией</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Элита</span>
+            <input class="input" type="number" id="setElitism" min="0" max="20" step="1">
+            <span class="field-hint">0–20; сколько лучших переходят в следующее поколение без изменений</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Поколений усадки</span>
+            <input class="input" type="number" id="setShrinkGenerations" min="0" max="2000" step="1">
+            <span class="field-hint">сколько искать формулу короче после решения</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Штраф усадки</span>
+            <input class="input" type="number" id="setShrinkParsimony" min="0" max="0.2" step="0.005">
+            <span class="field-hint">штраф за размер во время усадки (обычно сильно больше основного)</span>
+          </label>
+        </div>
+
+          <label class="field">
+            <span class="field-label">Поколений в автопилоте</span>
+            <input class="input" type="number" id="setAutopilotGens" min="1" max="10000" step="1">
+            <span class="field-hint">Сколько поколений тратить на одну задачу перед переходом к следующей (от 1 до макс. поколений)</span>
+          </label>
+        </div>
+
+        <h3 class="settings-section-title">Уведомления</h3>
+        <div class="settings-grid">
+          <div class="field">
+            <span class="field-label">Способы оповещения</span>
+            <div class="notify-toggles">
+              <label class="toggle-label"><input type="checkbox" id="setNotifyFlash"> Мигание вкладки</label>
+              <label class="toggle-label"><input type="checkbox" id="setNotifySound"> Звук</label>
+            </div>
+            <div class="field-inline" style="margin-top: 12px;">
+              <span class="field-label" style="min-width: 110px;">Громкость звука</span>
+              <input type="range" id="setNotifyVolume" min="0" max="1" step="0.05" style="width: 140px;">
+              <span class="num" id="setNotifyVolumeVal" style="font-size: var(--fs-small); color: var(--muted);">0.1</span>
+            </div>
+            <span class="field-hint">сработают, если вкладка свёрнута или неактивна</span>
+          </div>
+        </div>
+
         <div class="settings-actions">
           <button type="submit" class="btn btn-primary">Сохранить</button>
-          <button type="button" class="btn" id="settingsReset">Сбросить к дефолтам</button>
+          <button type="button" class="btn btn-danger" id="settingsReset">Сбросить к дефолтам</button>
         </div>
       </form>
     </section>
   </section>
 </main>
 
-<footer class="footer">
-  <span>seq2formula — локальный поиск формул. Этап 1: генетическое программирование.</span>
-</footer>
-
 <div id="plotPopover" class="plot-popover" hidden></div>
 
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
