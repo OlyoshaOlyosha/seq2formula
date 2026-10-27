@@ -14,11 +14,15 @@ import json
 import math
 import random
 import re
+import socket
+import threading
 import time
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -806,3 +810,31 @@ def index() -> FileResponse:
     # no-store: the page must always match the static assets beside it
     return FileResponse(ROOT / "static" / "index.html",
                         headers={"Cache-Control": "no-store"})
+
+
+def find_free_port(start_port: int = 8002) -> int:
+    """Return the first available port, starting from start_port."""
+    for port in range(start_port, start_port + 100):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # connect_ex returns 0 if the port is in use
+            if s.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+    raise RuntimeError("No free ports found in range 8002-8101")
+
+
+def open_browser(url: str) -> None:
+    """Wait a moment for the server to start, then open the browser."""
+    time.sleep(1.5)
+    webbrowser.open(url)
+
+
+if __name__ == "__main__":
+    port = find_free_port()
+    url = f"http://127.0.0.1:{port}"
+    
+    print(f"Starting seq2formula on {url}")
+    
+    # Open the browser in a background thread so it doesn't block uvicorn
+    threading.Thread(target=open_browser, args=(url,), daemon=True).start()
+    
+    uvicorn.run("app:app", host="127.0.0.1", port=port, log_level="info")
