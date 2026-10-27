@@ -69,7 +69,6 @@ def test_compiled_matches_reference_on_population():
     # whole-run check: every scored candidate's values must equal the
     # reference values (or both invalid)
     from engine import GPConfig, GPEngine
-    rng = random.Random(12)
     eng = GPEngine([2, 4, 5, 4, 1], GPConfig(seed=5))
     for _ in range(15):
         for node in eng.population:

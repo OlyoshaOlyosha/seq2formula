@@ -3,12 +3,10 @@
 import math
 import random
 
-from engine import (BinOp, Const, GPConfig, GPEngine, Neg, Node, UnOp,
-                    UNARY_FUNCS, from_dict, size, to_dict, to_text)
+from engine import UNARY_FUNCS, BinOp, Const, GPConfig, GPEngine, Neg, UnOp, from_dict, size, to_dict, to_text
 from engine.evaluator import evaluate
 from engine.fitness import score_candidate
-from engine.grammar import (BINARY_OPS, ensure_grammar, initial_population,
-                            point_mutation, random_tree)
+from engine.grammar import BINARY_OPS, ensure_grammar, point_mutation, random_tree
 from engine.nodes import VAR, Var
 
 

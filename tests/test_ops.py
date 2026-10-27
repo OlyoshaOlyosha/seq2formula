@@ -3,9 +3,8 @@
 import random
 
 from engine import GPConfig, GPEngine
-from engine.grammar import (BINARY_OPS, ensure_grammar, initial_population,
-                            point_mutation, random_tree, subtree_mutation)
-from engine.nodes import BinOp, VAR, depth
+from engine.grammar import BINARY_OPS, ensure_grammar, initial_population, point_mutation, random_tree, subtree_mutation
+from engine.nodes import VAR, BinOp, depth
 
 
 def collect_ops(node):

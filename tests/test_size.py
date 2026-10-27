@@ -1,10 +1,6 @@
 """Tests for the weighted parsimony size and constant penalties."""
 
-import pytest
-from engine.nodes import (
-    BinOp, Const, Neg, Var, VAR, UnOp,
-    const_weight, weighted_size
-)
+from engine.nodes import VAR, BinOp, Const, UnOp, const_weight, weighted_size
 
 
 def C(v):

@@ -2,9 +2,8 @@
 
 import random
 
-from engine.grammar import (crossover, ensure_grammar, initial_population,
-                            point_mutation, random_tree, subtree_mutation)
-from engine.nodes import BinOp, Const, Neg, Var, VAR, depth, size
+from engine.grammar import crossover, ensure_grammar, initial_population, point_mutation, random_tree, subtree_mutation
+from engine.nodes import VAR, BinOp, Const, Neg, Var, depth
 
 
 def test_initial_population_respects_limits():

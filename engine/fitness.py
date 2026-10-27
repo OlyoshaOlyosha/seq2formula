@@ -48,7 +48,7 @@ def score_candidate(node: Node, seq: list[float], parsimony: float) -> Score:
     
     # Inlined term_error logic to avoid thousands of function calls per generation
     errors = [min(1.0, abs(got - target) / max(1.0, abs(target))) 
-              for got, target in zip(values, seq)]
+              for got, target in zip(values, seq, strict=True)]
               
     error = sum(errors) / len(errors)
     exact = all(e < EPS for e in errors)

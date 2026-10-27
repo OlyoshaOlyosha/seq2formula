@@ -2,9 +2,8 @@
 
 import math
 
-from engine.fitness import (EPS, INVALID_FITNESS, score_candidate,
-                            term_error)
-from engine.nodes import BinOp, Const, Neg, Var, VAR
+from engine.fitness import INVALID_FITNESS, score_candidate, term_error
+from engine.nodes import VAR, BinOp, Const
 
 
 def B(op, left, right):

@@ -28,7 +28,7 @@ from .grammar import (
     shrink_mutation,
     subtree_mutation,
 )
-from .nodes import UNARY_FUNCS, Node, special_value, to_dict, to_text, simplify
+from .nodes import UNARY_FUNCS, Node, simplify, special_value, to_dict, to_text
 
 # Curiosity gallery: "almost correct" (mean error below) but comically
 # overbuilt (size at least) formulas, deduped by the values they produce.
@@ -255,7 +255,7 @@ class GPEngine:
             keys = [tuple(round(v, 4) for v in sc.values) if sc.values else ()
                     for _, sc in scored]
             counts = Counter(keys)
-            for (node, sc), key in zip(scored, keys):
+            for (node, sc), key in zip(scored, keys, strict=True):
                 if key and counts[key] > 1:
                     sc.fitness -= (counts[key] - 1) * 0.001
                     

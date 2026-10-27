@@ -1,7 +1,7 @@
 """Tests for the guarded evaluator."""
 
 from engine.evaluator import evaluate, evaluate_all
-from engine.nodes import BinOp, Const, Neg, Var, VAR
+from engine.nodes import VAR, BinOp, Const, Neg
 
 
 def B(op, left, right):
