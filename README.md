@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-98%20passed-3FC07A)
+![Tests](https://img.shields.io/badge/tests-99%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 seq2formula is a local experiment in symbolic regression: given a finite
@@ -49,6 +49,8 @@ per generation, population diversity, tree-size distribution, per-term
 error tables, a history of solved puzzles, a hall of fame of the shortest
 formulas, and a gallery of curious near-misses. A run can be paused,
 stepped through generation by generation, or accelerated at any time.
+An **Autopilot** mode can run through the entire puzzle library (65
+sequences) automatically, solving them one by one in the background.
 
 ## Getting started
 
@@ -74,7 +76,7 @@ Experimental, in continuous development.
 - Grammar v2 (done) — unary functions (roots, factorial, trigonometry,
   logarithm), the remainder operator, and the π / e constants, with the
   picker regrouped into basic and advanced sets; puzzle tiers T4/T5
-  showcase the new operations (41 puzzles in total).
+  showcase the new operations (65 puzzles in total).
 - Performance and search quality (done) — compiled-formula evaluation
   (~3× faster generations), diversity mechanics (fitness sharing,
   adaptive anti-stagnation shocks, weighted parsimony), and a settings
