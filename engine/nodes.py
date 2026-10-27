@@ -164,8 +164,10 @@ def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")
             if not combined:
                 return Const(0.0)
 
-            # Sort: variables first, constants last
-            sorted_terms = sorted(combined.items(), key=lambda item: isinstance(item[0], Const))
+            # Sort: positive terms first, then variables before constants.
+            # This prevents the simplifier from rewriting "7 - n" as "-n + 7"
+            # (which adds an unnecessary Neg node and increases the size).
+            sorted_terms = sorted(combined.items(), key=lambda item: (item[1] < 0, isinstance(item[0], Const)))
 
             result = None
             for term, coeff in sorted_terms:
@@ -176,7 +178,12 @@ def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")
 
                 if isinstance(term, Const):
                     val = sign * coeff * term.value
-                    term_node = Const(val)
+                    if val < 0:
+                        sign = -1
+                        term_node = Const(abs(val))
+                    else:
+                        sign = 1
+                        term_node = Const(val)
                 elif abs(coeff - 1.0) < 1e-9:
                     term_node = term
                 else:
@@ -186,7 +193,10 @@ def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")
                     result = term_node if sign == 1 or isinstance(term_node, Const) else Neg(term_node)
                 else:
                     if sign == -1:
-                        result = BinOp("-", result, term_node)
+                        if "-" in ops:
+                            result = BinOp("-", result, term_node)
+                        else:
+                            result = BinOp("+", result, Neg(term_node))
                     else:
                         result = BinOp("+", result, term_node)
             return result
@@ -194,12 +204,16 @@ def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")
         # 2. Constant folding
         if isinstance(left, Const) and isinstance(right, Const):
             try:
-                if node.op == "*": return Const(left.value * right.value)
-                if node.op == "/" and right.value != 0: return Const(left.value / right.value)
-                if node.op == "mod" and right.value != 0: return Const(left.value % right.value)
+                if node.op == "*":
+                    return Const(left.value * right.value)
+                if node.op == "/" and right.value != 0:
+                    return Const(left.value / right.value)
+                if node.op == "mod" and right.value != 0:
+                    return Const(left.value % right.value)
                 if node.op == "^":
                     val = left.value ** right.value
-                    if isinstance(val, complex) or not math.isfinite(val): return BinOp(node.op, left, right)
+                    if isinstance(val, complex) or not math.isfinite(val):
+                        return BinOp(node.op, left, right)
                     return Const(val)
             except (OverflowError, ZeroDivisionError, ValueError):
                 pass
@@ -244,10 +258,13 @@ def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")
                 res = BinOp("*", res, f)
             return res
         if node.op == "/":
-            if isinstance(right, Const) and right.value == 1: return left
+            if isinstance(right, Const) and right.value == 1:
+                return left
         if node.op == "^":
-            if isinstance(right, Const) and right.value == 1: return left
-            if isinstance(right, Const) and right.value == 0: return Const(1.0)
+            if isinstance(right, Const) and right.value == 1:
+                return left
+            if isinstance(right, Const) and right.value == 0:
+                return Const(1.0)
 
         return BinOp(node.op, left, right)
         
