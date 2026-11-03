@@ -1,5 +1,6 @@
 """seq2formula engine: grammar, evaluation, fitness, GP search."""
 
+from .curve import CurveConfig, CurveGP
 from .evaluator import evaluate, evaluate_all
 from .fitness import EPS, Score, score_candidate, term_error
 from .gp import GPConfig, GPEngine
@@ -8,7 +9,7 @@ from .nodes import UNARY_FUNCS, BinOp, Const, Neg, Node, UnOp, Var, depth, from_
 __all__ = [
     "evaluate", "evaluate_all",
     "EPS", "Score", "score_candidate", "term_error",
-    "GPConfig", "GPEngine",
+    "GPConfig", "GPEngine", "CurveConfig", "CurveGP",
     "BinOp", "Const", "Neg", "Node", "UnOp", "UNARY_FUNCS", "Var",
     "depth", "from_dict", "size", "to_dict", "to_text",
 ]
