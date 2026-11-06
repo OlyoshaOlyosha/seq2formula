@@ -1105,3 +1105,41 @@ input[type="range"] {
 .diff-dot.medium { background: var(--amber); }
 .diff-dot.hard { background: var(--negative); }
 .diff-dot.unseen { background: var(--faint); }
+
+/* ===== Curves mode («Кривые») ===== */
+.curves-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 480px) 1fr;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+  align-items: start;
+}
+
+.curve-canvas-wrap { margin-bottom: 12px; }
+
+#curveCanvas {
+  display: block;
+  width: 100%;
+  max-width: 460px;
+  aspect-ratio: 1;
+  background: var(--ground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.curve-live-panel { min-width: 0; }
+
+.curve-hero { margin-bottom: 12px; }
+.curve-hero .hero-formula .katex { font-size: 1.3em; }
+.curve-hero .hero-formula { margin-bottom: 6px; }
+
+.curve-pair { margin-right: 20px; white-space: nowrap; }
+
+.ops-row-compact { margin-top: 10px; }
+
+@media (max-width: 1100px) {
+  .curves-grid { grid-template-columns: 1fr; }
+  #curveCanvas { max-width: 100%; }
+}

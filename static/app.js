@@ -29,6 +29,15 @@ const state = {
   wasShocking: false,      // dedupe shock entries in the race log
   pendingPuzzleRestore: "", // remembered puzzle id, applied once the library loads
   isAutopilot: false,      // is the autopilot queue currently running
+  mode: "sequence",        // sequence | curve — what the current run is
+  curvePoints: [],         // target cloud in the unit square (y down, canvas-style)
+  curveStroke: [],         // freehand stroke currently being drawn
+  curveDrawing: false,
+  curveBuf: null,          // per-run curve chart buffers
+  curveBestCurve: null,    // latest best {xs, ys} for the canvas overlay
+  curveSolved: false,
+  curveRafPending: false,
+  lastCurveTexts: "",
 };
 
 /* ---------- formatting ---------- */
@@ -178,6 +187,13 @@ function renderKatex(el, latex, displayMode) {
   }
 }
 
+/* Curve mode: the grammar's variable "n" plays the role of the parameter;
+   relabel it to t in the rendered LaTeX. Word boundaries only — \sin, \ln
+   and friends must survive untouched. */
+function astToLatexT(ast) {
+  return astToLatex(ast).replace(/(?<![a-zA-Z\\])n(?![a-zA-Z])/g, "t");
+}
+
 /* ---------- charts (uPlot) ---------- */
 
 const CHART_COLORS = {
@@ -276,6 +292,19 @@ function makeCharts() {
       axes: [{ show: false }, { show: false }] },
     [[], [], []], $("heroChart"));
 
+  // curve mode: best/mean error per generation, same look as the
+  // sequence error chart
+  state.charts.curveError = new uPlot(
+    { ...common,
+      series: [
+        { label: "поколение" },
+        { ...lineSeries("лучшая", CHART_COLORS.amber), width: 2 },
+        lineSeries("средняя", CHART_COLORS.muted, [4, 4]),
+      ],
+      axes: [axisX, { ...axisOpts(3), label: "ошибка",
+                      values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
+    [[], [], []], $("chartCurveError"));
+
   resizeCharts();
 }
 
@@ -283,7 +312,7 @@ function resizeCharts() {
   const boxes = [
     ["fitness", "chartFitness"], ["error", "chartError"],
     ["diversity", "chartDiversity"], ["sizes", "chartSizes"],
-    ["hero", "heroChart"],
+    ["hero", "heroChart"], ["curveError", "chartCurveError"],
   ];
   for (const [key, id] of boxes) {
     const el = $(id);
@@ -383,9 +412,14 @@ function setStatus(status) {
   else if (status === "paused") setChip("пауза", "paused");
   else if (status === "finished") setChip("завершено", "finished");
   else setChip("нет прогона");
+  syncCurveUI();
 }
 
 function applyGen(msg) {
+  if (msg.mode === "curve") {
+    applyCurveGen(msg);
+    return;
+  }
   const b = state.buffers;
   if (!b) return;
   b.gen.push(msg.gen);
@@ -683,6 +717,10 @@ function buildTermsRow(row, label, cells, collect) {
 }
 
 function applySolved(msg) {
+  if (state.mode === "curve") {
+    applyCurveSolved(msg);
+    return;
+  }
   state.lastRunSolved = true;
   setStatus("finished");
   setChip("решено", "solved");
@@ -729,6 +767,7 @@ function applySolved(msg) {
 }
 
 function applyStatusMsg(msg) {
+  state.mode = msg.mode || "sequence";
   setStatus(msg.status);
   if ("solved" in msg) state.lastRunSolved = msg.solved === true;
   
@@ -773,7 +812,8 @@ function applyStatusMsg(msg) {
   // If we connected mid-run, the server sent the last generation data.
   // Apply it immediately so the UI isn't empty waiting for the next tick.
   if (msg.last_gen && (!state.lastGenNum || msg.last_gen.gen >= state.lastGenNum)) {
-    applyGen(msg.last_gen);
+    if (msg.mode === "curve") applyCurveGen(msg.last_gen);
+    else applyGen(msg.last_gen);
   }
 
   // Update autopilot state and button
@@ -798,6 +838,339 @@ function applyStatusMsg(msg) {
   // Force a resize after the browser has laid out the newly unhidden grid.
   if (msg.status === "running") {
     setTimeout(resizeCharts, 10);
+  }
+}
+
+/* ---------- curve mode («Кривые») ---------- */
+
+/* Mirror of engine/curve.py SOLVE_ERROR: "solved" = mean two-sided
+   distance below 2% of the unit square. */
+const SOLVE_ERROR_JS = 0.02;
+const CURVE_STROKE_POINTS = 64;   // matches CURVE_SAMPLES on the engine
+const MAX_CURVE_POINTS = 200;     // server-side cap, mirrored here
+
+function resetCurveState() {
+  state.curveBuf = { gen: [], bestE: [], meanE: [] };
+  state.curveBestCurve = null;
+  state.curveSolved = false;
+  state.lastCurveTexts = "";
+  state.genTimestamps = [];
+  state.lastGenNum = null;
+  if (state.charts.curveError) state.charts.curveError.setData([[], [], []]);
+  drawCurveCanvas();
+}
+
+/* Enable/disable the curve controls and keep the pane visible exactly
+   while a curve run exists (running, paused or finished). */
+function syncCurveUI() {
+  const running = state.status === "running" || state.status === "paused";
+  $("curveStartBtn").disabled = running || state.curvePoints.length < 2;
+  $("curveStopBtn").disabled = !running;
+  const chip = $("curveChip");
+  if (state.status === "running") chip.textContent = "поиск идёт";
+  else if (state.status === "paused") chip.textContent = "пауза";
+  else if (state.status === "finished") chip.textContent = "завершено";
+  else chip.textContent = "нет прогона";
+  const showLive = state.mode === "curve" && (running || state.status === "finished");
+  $("curveEmpty").hidden = showLive;
+  $("curveLive").hidden = !showLive;
+}
+
+/* Resample a freehand stroke to ~64 evenly spaced points (by arc length,
+   like the engine samples t); a short stroke collapses to one point,
+   which is how a simple click becomes a single target point. */
+function resampleStroke(raw) {
+  if (!raw || !raw.length) return [];
+  if (raw.length === 1) return [raw[0]];
+  let len = 0;
+  for (let i = 1; i < raw.length; i++) {
+    len += Math.hypot(raw[i].x - raw[i - 1].x, raw[i].y - raw[i - 1].y);
+  }
+  if (len < 0.02) return [raw[raw.length - 1]];
+  const n = Math.min(CURVE_STROKE_POINTS, Math.max(2, raw.length));
+  const step = len / (n - 1);
+  const out = [raw[0]];
+  let acc = 0;
+  let prev = raw[0];
+  for (let i = 1; i < raw.length && out.length < n; i++) {
+    let d = Math.hypot(raw[i].x - prev.x, raw[i].y - prev.y);
+    while (acc + d >= step && out.length < n) {
+      const t = (step - acc) / d;
+      const p = { x: prev.x + (raw[i].x - prev.x) * t,
+                  y: prev.y + (raw[i].y - prev.y) * t };
+      out.push(p);
+      d = Math.hypot(raw[i].x - p.x, raw[i].y - p.y);
+      prev = p;
+      acc = 0;
+    }
+    acc += d;
+    prev = raw[i];
+  }
+  return out;
+}
+
+function initCurveCanvas() {
+  const canvas = $("curveCanvas");
+
+  const toUnit = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    state.curveDrawing = true;
+    state.curveStroke = [toUnit(e)];
+    drawCurveCanvas();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!state.curveDrawing) return;
+    state.curveStroke.push(toUnit(e));
+    drawCurveCanvas();
+  });
+  const finishStroke = () => {
+    if (!state.curveDrawing) return;
+    state.curveDrawing = false;
+    const pts = resampleStroke(state.curveStroke);
+    state.curveStroke = [];
+    for (const p of pts) {
+      if (state.curvePoints.length >= MAX_CURVE_POINTS) {
+        alertErr("максимум 200 точек цели");
+        break;
+      }
+      state.curvePoints.push(p);
+    }
+    syncCurveUI();
+    drawCurveCanvas();
+  };
+  canvas.addEventListener("pointerup", finishStroke);
+  canvas.addEventListener("pointercancel", finishStroke);
+}
+
+function drawCurveCanvas() {
+  const canvas = $("curveCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // frame of the unit square
+  ctx.strokeStyle = CHART_COLORS.grid;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, W - 2, H - 2);
+
+  // target points — the drawing the user made
+  ctx.fillStyle = CHART_COLORS.faint;
+  for (const p of state.curvePoints) {
+    ctx.beginPath();
+    ctx.arc(p.x * W, p.y * H, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // in-progress stroke as feedback
+  if (state.curveStroke.length > 1) {
+    ctx.strokeStyle = CHART_COLORS.accent;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.moveTo(state.curveStroke[0].x * W, state.curveStroke[0].y * H);
+    for (const p of state.curveStroke) ctx.lineTo(p.x * W, p.y * H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // the best curve found so far (parametric polyline over 64 samples)
+  const c = state.curveBestCurve;
+  if (c && c.xs && c.xs.length) {
+    ctx.strokeStyle = state.curveSolved ? CHART_COLORS.positive : CHART_COLORS.accent;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(c.xs[0] * W, c.ys[0] * H);
+    for (let i = 1; i < c.xs.length; i++) ctx.lineTo(c.xs[i] * W, c.ys[i] * H);
+    ctx.stroke();
+  }
+}
+
+function applyCurveGen(msg) {
+  const b = state.curveBuf;
+  if (!b) return;
+  b.gen.push(msg.gen);
+  const s = msg.stats;
+  b.bestE.push(s.best_error === null ? null : s.best_error);
+  b.meanE.push(s.mean_error === null ? null : s.mean_error);
+
+  $("curveGen").textContent = String(msg.gen + 1);
+  const errEl = $("curveError");
+  errEl.textContent = msg.best.error === null ? "∞" : fmtPercent(msg.best.error);
+  errEl.classList.toggle("ok",
+    msg.best.error !== null && msg.best.error < SOLVE_ERROR_JS);
+  $("curveSize").textContent = String(msg.best.size);
+  const uniqueCount = Math.round(s.diversity * msg.population);
+  $("curveDiversity").textContent = `${fmtPercent(s.diversity)} (${uniqueCount})`;
+  // speed/time KPI — same logic as the sequence pane
+  const now = performance.now();
+  state.genTimestamps.push(now);
+  while (state.genTimestamps.length > 1 &&
+         now - state.genTimestamps[0] > 2000) state.genTimestamps.shift();
+  const span = (now - state.genTimestamps[0]) / 1000;
+  const gps = state.genTimestamps.length > 1 && span > 0.3
+    ? fmtNum((state.genTimestamps.length - 1) / span) + " пок/с" : "—";
+  const elapsed = state.runStartedAt ? fmtTime((now - state.runStartedAt) / 1000) : "—";
+  $("curveSpeedTime").textContent = `${gps} · ${elapsed}`;
+
+  // hero pair: re-render only when the text changes
+  const texts = msg.best.x_text + "\n" + msg.best.y_text;
+  if (texts !== state.lastCurveTexts) {
+    state.lastCurveTexts = texts;
+    renderKatex($("curveFormulaX"), `x(t) = ${astToLatexT(msg.best.x_ast)}`, true);
+    renderKatex($("curveFormulaY"), `y(t) = ${astToLatexT(msg.best.y_ast)}`, true);
+  }
+  const sub = [`fitness ${fmtNum(msg.best.fitness)}`];
+  if (msg.best.solved) sub.push('<span class="ok">порог взят</span>');
+  $("curveSub").innerHTML = sub.join(" · ");
+
+  state.curveSolved = msg.solved;
+  state.curveBestCurve = msg.best.curve;
+  scheduleCurveUpdate();
+}
+
+function scheduleCurveUpdate() {
+  if (state.curveRafPending) return;
+  state.curveRafPending = true;
+  requestAnimationFrame(() => {
+    state.curveRafPending = false;
+    const b = state.curveBuf;
+    if (b && state.charts.curveError) {
+      state.charts.curveError.setData([b.gen, b.bestE, b.meanE]);
+    }
+    drawCurveCanvas();
+  });
+}
+
+function applyCurveSolved(msg) {
+  state.lastRunSolved = true;
+  setStatus("finished");
+  $("curveChip").textContent = "решено";
+  $("curveChip").className = "chip solved";
+  if (state.settings) {
+    if (state.settings.notify_sound && state.settings.notify_volume > 0) {
+      playSolvedSound(state.settings.notify_volume);
+    }
+    if (state.settings.notify_flash) startTitleFlash();
+  }
+  const note = $("curveNote");
+  note.classList.add("show");
+  note.textContent = `Порог взят за ${msg.generations} поколений`
+    + (msg.time_s !== null && msg.time_s !== undefined
+        ? ` · ${fmtTime(msg.time_s)}` : "");
+  refreshAll();
+}
+
+async function startCurveRun(event) {
+  if (event) event.preventDefault();
+  stopTitleFlash();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  if (state.curvePoints.length < 2) {
+    alertErr("нарисуйте хотя бы две точки");
+    return;
+  }
+  if (state.ops.size === 0) {
+    alertErr("не выбрана ни одна операция");
+    return;
+  }
+  const seedRaw = $("curveSeedInput").value.trim();
+  let seed = null;
+  if (seedRaw !== "") {
+    seed = Number(seedRaw);
+    if (!Number.isInteger(seed) || seed < 0) {
+      alertErr("seed должен быть целым неотрицательным числом");
+      return;
+    }
+  }
+  // round to 4 decimals: keeps the payload small, invisible on the canvas
+  const points = state.curvePoints.map((p) => [
+    Math.round(p.x * 10000) / 10000,
+    Math.round(p.y * 10000) / 10000,
+  ]);
+  const body = {
+    mode: "curve",
+    points,
+    speed: Number($("speedRange").value),
+    ops: [...state.ops],
+    seed,
+  };
+  const btn = $("curveStartBtn");
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "Запуск…";
+  try {
+    const status = await api("/api/run", body);
+    resetCurveState();
+    state.lastRunSolved = false;
+    state.runStartedAt = performance.now();
+    $("curveNote").classList.remove("show");
+    $("curveNote").innerHTML = "";
+    applyStatusMsg(status);
+    scheduleCurveUpdate();
+  } catch (e) {
+    alertErr("не удалось запустить: " + e.message);
+  } finally {
+    btn.innerHTML = originalText;
+    syncCurveUI();
+  }
+}
+
+async function loadCurves() {
+  const data = await api("/api/curves");
+  const rows = $("curveRows");
+  rows.innerHTML = "";
+  if (!data.curves.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "list-empty";
+    td.textContent = "Галерея пуста: завершённые прогоны появятся здесь.";
+    tr.appendChild(td);
+    rows.appendChild(tr);
+    return;
+  }
+  for (const c of data.curves) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable-row";
+    tr.title = "Вернуть этот рисунок на холст";
+    tr.addEventListener("click", () => {
+      if (!Array.isArray(c.points)) return;
+      state.curvePoints = c.points.map(([x, y]) => ({ x, y }));
+      state.curveBestCurve = null;
+      state.curveSolved = false;
+      drawCurveCanvas();
+      syncCurveUI();
+    });
+
+    addCell(tr, "td", fmtWhen(c.ts));
+
+    const f = document.createElement("td");
+    const wrapX = document.createElement("span");
+    wrapX.className = "curve-pair";
+    renderKatex(wrapX, `x(t) = ${astToLatexT(c.x_ast)}`, false);
+    const wrapY = document.createElement("span");
+    wrapY.className = "curve-pair";
+    renderKatex(wrapY, `y(t) = ${astToLatexT(c.y_ast)}`, false);
+    f.append(wrapX, wrapY);
+    tr.appendChild(f);
+
+    const err = document.createElement("td");
+    err.className = "num " + (c.solved ? "solved-text" : "amber-text");
+    err.textContent = fmtPercent(c.error);
+    tr.appendChild(err);
+
+    addCell(tr, "td", String(c.generations), "num");
+    addCell(tr, "td", fmtTime(c.time_s), "num");
+    rows.appendChild(tr);
   }
 }
 
@@ -1373,7 +1746,7 @@ async function loadCuriosities() {
 
 function highlightActiveRow() {
   document.querySelectorAll("tbody tr").forEach(tr => tr.classList.remove("active-autopilot"));
-  if (state.status === "running" && state.puzzleTerms) {
+  if (state.status === "running" && state.mode === "sequence" && state.puzzleTerms) {
     const seqKey = state.puzzleTerms.join(",");
     document.querySelectorAll(`tbody tr[data-seq="${seqKey}"]`).forEach(row => {
       row.classList.add("active-autopilot");
@@ -1417,7 +1790,8 @@ function refreshAll() {
     loadLibrary().catch(() => {}),
     loadMySeqs().catch(() => {}),
     loadCuriosities().catch(() => {}),
-    loadStats().catch(() => {})
+    loadStats().catch(() => {}),
+    loadCurves().catch(() => {})
   ]).then(() => {
     applyTableFilter();
     highlightActiveRow();
@@ -1888,6 +2262,20 @@ function bindControls() {
   $("stepBtn").addEventListener("click", () => control("step"));
   $("stopBtn").addEventListener("click", () => control("stop"));
   $("continueBtn").addEventListener("click", () => control("continue"));
+  // curve mode controls: start/stop/clear + digits-only seed
+  $("curveStartBtn").addEventListener("click", startCurveRun);
+  $("curveStopBtn").addEventListener("click", () => control("stop"));
+  $("curveClearBtn").addEventListener("click", () => {
+    state.curvePoints = [];
+    state.curveStroke = [];
+    state.curveBestCurve = null;
+    drawCurveCanvas();
+    syncCurveUI();
+  });
+  $("curveSeedInput").addEventListener("input", (e) => {
+    const cleaned = e.target.value.replace(/\D/g, "");
+    if (cleaned !== e.target.value) e.target.value = cleaned;
+  });
   $("bestFormula").addEventListener("click", copyBestFormula);
   $("bestFormula").addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -1925,8 +2313,9 @@ function bindControls() {
   }
   $("resultsMeta").textContent = RESULT_META.library;
 
-  // top-level page tabs: Поиск / Результаты / Настройки
-  const panes = [["ptabSearch", "paneSearch"], ["ptabResults", "paneResults"],
+  // top-level page tabs: Поиск / Кривые / Результаты / Настройки
+  const panes = [["ptabSearch", "paneSearch"], ["ptabCurves", "paneCurves"],
+                 ["ptabResults", "paneResults"],
                  ["ptabSettings", "paneSettings"]];
   for (const [tabId, paneId] of panes) {
     $(tabId).addEventListener("click", () => {
@@ -1936,7 +2325,10 @@ function bindControls() {
       }
       if (tabId === "ptabResults") {
         $("resultsDot").hidden = true;
-        setTimeout(resizeCharts, 50); // delay helps uPlot get the right container width
+      }
+      if (tabId === "ptabResults" || tabId === "ptabCurves") {
+        // delay helps uPlot get the right container width
+        setTimeout(resizeCharts, 50);
       }
     });
   }
@@ -2125,7 +2517,7 @@ function bindControls() {
   // changes and pane switches); window resize alone misses both
   const ro = new ResizeObserver(resizeCharts);
   for (const id of ["chartFitness", "chartError", "chartDiversity", "chartSizes",
-                    "heroChart"]) {
+                    "heroChart", "chartCurveError"]) {
     ro.observe($(id));
   }
 
@@ -2136,6 +2528,8 @@ function bindControls() {
 
 resetBuffers();
 makeCharts();
+initCurveCanvas();
+resetCurveState();
 bindControls();
 refreshAll();
 loadSettings().catch(() => {});

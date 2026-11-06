@@ -19,6 +19,7 @@
   </div>
   <nav class="pagetabs" role="tablist" aria-label="Разделы">
     <button class="ptab" id="ptabSearch" role="tab" aria-selected="true">Поиск</button>
+    <button class="ptab" id="ptabCurves" role="tab" aria-selected="false">Кривые</button>
     <button class="ptab" id="ptabResults" role="tab" aria-selected="false">
       Результаты <span class="tab-dot" id="resultsDot" hidden></span>
     </button>
@@ -223,6 +224,124 @@
           <ul class="race-log" id="raceLog"></ul>
         </div>
       </div>
+    </section>
+  </section>
+
+  <!-- ===== Curves: draw a shape, evolve x(t)/y(t) to fit it ===== -->
+  <section id="paneCurves" hidden aria-label="Кривые">
+    <div class="curves-grid">
+      <section class="panel curve-draw-panel" aria-label="Рисование цели">
+        <div class="panel-head">
+          <h2 class="panel-title">Рисунок</h2>
+          <span class="head-right"><span class="chip" id="curveChip">нет прогона</span></span>
+        </div>
+        <p class="field-hint">Зажмите мышь и ведите — штрих превратится в точки цели.
+          Одиночный клик ставит одну точку. Серые точки — ваша цель,
+          индиго-линия — лучшая кривая x(t), y(t), найденная эволюцией.</p>
+        <div class="curve-canvas-wrap">
+          <canvas id="curveCanvas" width="800" height="800"
+                  aria-label="Поле для рисования кривой"></canvas>
+        </div>
+        <div class="run-controls" id="curveControls">
+          <div class="control-group" role="group" aria-label="Управление поиском кривой">
+            <button class="btn btn-primary" id="curveStartBtn">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+              Запустить
+            </button>
+            <button class="btn btn-danger" id="curveStopBtn" disabled>
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+              Стоп
+            </button>
+            <button class="btn" id="curveClearBtn">Очистить</button>
+          </div>
+          <label class="seed field-inline">
+            <span class="field-label">Seed</span>
+            <input type="text" id="curveSeedInput" class="input seed-field"
+                   inputmode="numeric" maxlength="10" placeholder="случайный"
+                   autocomplete="off"
+                   title="Пусто — новый случайный сид; число — воспроизводимый прогон">
+          </label>
+        </div>
+        <div class="ops-row ops-row-compact" role="group" aria-label="Операции для кривых">
+          <span class="ops-label">Операции формул</span>
+          <div class="ops-groups">
+            <div class="ops-group">
+              <span class="ops-group-name clickable-group" role="button" tabindex="0" title="Включить/выключить все базовые">Базовые</span>
+              <div class="op-chips">
+                <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
+                <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
+                <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="умножение">×</button>
+                <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="деление">÷</button>
+                <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="возведение в степень">xʸ</button>
+              </div>
+            </div>
+            <div class="ops-group">
+              <span class="ops-group-name clickable-group" role="button" tabindex="0" title="Включить/выключить все расширенные">Расширенные</span>
+              <div class="op-chips">
+                <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="квадратный корень">√</button>
+                <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="кубический корень">∛</button>
+                <button type="button" class="op-chip" data-op="fact" aria-pressed="false" title="факториал">!</button>
+                <button type="button" class="op-chip" data-op="abs" aria-pressed="false" title="модуль числа">|x|</button>
+                <button type="button" class="op-chip" data-op="mod" aria-pressed="false" title="остаток от деления (mod)">%</button>
+                <button type="button" class="op-chip" data-op="sin" aria-pressed="false" title="синус">sin</button>
+                <button type="button" class="op-chip" data-op="cos" aria-pressed="false" title="косинус">cos</button>
+                <button type="button" class="op-chip" data-op="tan" aria-pressed="false" title="тангенс">tan</button>
+                <button type="button" class="op-chip" data-op="ln" aria-pressed="false" title="натуральный логарифм">ln</button>
+                <button type="button" class="op-chip" data-op="pi" aria-pressed="false" title="число π">π</button>
+                <button type="button" class="op-chip" data-op="e" aria-pressed="false" title="число e">e</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="solved-note" id="curveNote"></div>
+      </section>
+
+      <section class="panel curve-live-panel" aria-label="Текущий поиск кривой">
+        <div class="panel-head">
+          <h2 class="panel-title">Текущий поиск</h2>
+        </div>
+        <div class="live-empty" id="curveEmpty">
+          Нарисуйте фигуру слева и запустите поиск: эволюция подберёт пару
+          формул x(t) и y(t), кривая которых повторяет рисунок.
+        </div>
+        <div id="curveLive" hidden>
+          <div class="formula-hero curve-hero">
+            <div class="hero-main">
+              <div class="hero-label"><span class="hero-dot"></span><span>Лучшие формулы</span></div>
+              <div class="hero-formula" id="curveFormulaX" aria-live="polite"></div>
+              <div class="hero-formula" id="curveFormulaY" aria-live="polite"></div>
+              <div class="hero-sub num" id="curveSub"></div>
+            </div>
+          </div>
+          <div class="kpi-strip">
+            <div class="kpi" data-tip="Номер шага эволюции: каждое поколение отбирает лучшие пары формул и выводит из них следующее поколение">
+              <span class="kpi-label">Поколение</span><span class="kpi-value num" id="curveGen">—</span></div>
+            <div class="kpi" data-tip="Средний промах кривой мимо точек рисунка (в обе стороны), доля от размера поля; 2% — считается решённым">
+              <span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="curveError">—</span></div>
+            <div class="kpi" data-tip="Суммарный размер двух формул x(t) и y(t); чем меньше, тем проще пара">
+              <span class="kpi-label">Размер пары</span><span class="kpi-value num" id="curveSize">—</span></div>
+            <div class="kpi" data-tip="Доля уникальных кривых в популяции; 100% — все разные, 0% — выродились в копии">
+              <span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="curveDiversity">—</span></div>
+            <div class="kpi" data-tip="Фактическая скорость поиска и длительность текущего прогона">
+              <span class="kpi-label">Скорость / время</span><span class="kpi-value num kpi-small" id="curveSpeedTime">—</span></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-head"><h3 class="chart-title">Ошибка по поколениям</h3></div>
+            <div class="chart" id="chartCurveError"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel curve-history-panel" aria-label="Галерея кривых">
+      <div class="panel-head">
+        <h2 class="panel-title">Галерея кривых</h2>
+        <span class="panel-meta">завершённые прогоны; клик по строке — вернуть рисунок на холст</span>
+      </div>
+      <table class="list-table" id="curveTable">
+        <thead><tr><th>Дата</th><th>Формулы</th><th class="num">Ошибка</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
+        <tbody id="curveRows"></tbody>
+      </table>
     </section>
   </section>
 

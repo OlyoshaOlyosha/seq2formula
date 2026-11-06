@@ -28,7 +28,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from engine import UNARY_FUNCS, GPConfig, GPEngine, to_dict, to_text
+from engine import (
+    UNARY_FUNCS,
+    CurveConfig,
+    CurveGP,
+    GPConfig,
+    GPEngine,
+    to_dict,
+    to_text,
+)
 from engine.grammar import BINARY_OPS
 
 # Grammar feature tokens the dashboard may send in RunRequest.ops: binary
@@ -42,12 +50,15 @@ DATA_DIR = ROOT / "data"
 HISTORY_FILE = DATA_DIR / "history.json"
 CURIOSITY_FILE = DATA_DIR / "curiosities.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+CURVES_FILE = DATA_DIR / "curves.json"
 HISTORY_CAP = 500        # solved runs kept in the file
 CURIOSITY_CAP = 60       # gallery entries kept across all runs
 CURIOSITY_PER_RUN = 4    # best entries saved from one run
+CURVES_CAP = 100         # finished curve runs kept in the file
 
 MIN_TERMS, MAX_TERMS = 2, 32
 TERM_ABS_LIMIT = 1e9
+MIN_POINTS, MAX_POINTS = 2, 200   # curve-mode target point cloud bounds
 DEFAULT_GPS = 100.0
 
 # Engine knobs the Настройки tab can change; a fresh store starts here.
@@ -132,7 +143,9 @@ def hall_of_fame() -> list[dict]:
 # --------------------------------------------------------------------------
 
 class RunRequest(BaseModel):
+    mode: str = Field(default="sequence", pattern="^(sequence|curve)$")
     terms: list[float] | None = None
+    points: list[list[float]] | None = None  # curve mode: target cloud
     puzzle_id: str | None = None
     population: int | None = Field(default=None, ge=20, le=2000)
     parsimony: float | None = Field(default=None, ge=0.0, le=0.1)
@@ -184,7 +197,7 @@ class SpeedRequest(BaseModel):
 
 class RunManager:
     def __init__(self) -> None:
-        self.engine: GPEngine | None = None
+        self.engine: GPEngine | CurveGP | None = None
         self.task: asyncio.Task | None = None
         self.status: str = "idle"  # idle | running | paused | finished
         self.delay: float = 1.0 / DEFAULT_GPS
@@ -192,7 +205,9 @@ class RunManager:
         self.started_at: float = 0.0
         self.solved_wall_time: float | None = None
         self.puzzle: dict | None = None
+        self.mode: str = "sequence"  # sequence | curve
         self.terms: list[float] = []
+        self.points: list[list[float]] | None = None
         self.last_gen: dict | None = None
         self.finish_reason: str | None = None
         self.config_summary: dict = {}
@@ -222,7 +237,6 @@ class RunManager:
     # -- run lifecycle -------------------------------------------------------
 
     def start(self, request: RunRequest) -> dict:
-        terms, puzzle = self._resolve_terms(request)
         self.stop(reason="replaced", notify=False)
         allowed_ops, allowed_funcs, allowed_consts = \
             self._validate_grammar(request.ops)
@@ -232,27 +246,51 @@ class RunManager:
         # used stored in history so the run can be replayed later.
         seed = (request.seed if request.seed is not None
                 else random.randrange(2**31))
-        config = GPConfig(
+        # Knobs shared by both engines; the Настройки tab drives them.
+        common = dict(
             seed=seed,
             population=(request.population if request.population is not None
                         else settings["population"]),
-            parsimony=(request.parsimony if request.parsimony is not None
-                       else settings["parsimony"]),
             max_generations=(request.max_generations
                              if request.max_generations is not None
                              else settings["max_generations"]),
-            max_depth=settings["max_depth"],
             tournament=settings["tournament"],
             p_crossover=settings["p_crossover"],
             p_mutate=settings["p_mutate"],
             elitism=settings["elitism"],
-            shrink_generations=settings["shrink_generations"],
-            shrink_parsimony=settings["shrink_parsimony"],
             allowed_ops=allowed_ops,
             allowed_funcs=allowed_funcs,
             allowed_consts=allowed_consts,
         )
-        self.engine = GPEngine(terms, config)
+        puzzle: dict | None = None
+        if request.mode == "curve":
+            # Curve-tuned values differ from the sequence engine on purpose:
+            # a pair of trees needs shallower depth, and at the sequence
+            # parsimony (0.003) a pair drifts into wiggly monsters fast
+            # (see engine/curve.py).
+            config = CurveConfig(
+                **common,
+                parsimony=(request.parsimony if request.parsimony is not None
+                           else 0.01),
+                max_depth=5,
+            )
+            self.engine = CurveGP(self._validate_points(request.points), config)
+            self.points = request.points
+            self.terms = []
+        else:
+            config = GPConfig(
+                **common,
+                parsimony=(request.parsimony if request.parsimony is not None
+                           else settings["parsimony"]),
+                max_depth=settings["max_depth"],
+                shrink_generations=settings["shrink_generations"],
+                shrink_parsimony=settings["shrink_parsimony"],
+            )
+            terms, puzzle = self._resolve_terms(request)
+            self.engine = GPEngine(terms, config)
+            self.terms = terms
+            self.points = None
+        self.mode = request.mode
         self.status = "running"
         self.delay = 1.0 / request.speed
         self.step_once = False
@@ -262,7 +300,6 @@ class RunManager:
         self.started_at = time.perf_counter()
         self.solved_wall_time = None
         self.puzzle = puzzle
-        self.terms = terms
         self.last_gen = None
         self.finish_reason = None
         self.custom_reference = request.reference
@@ -316,6 +353,29 @@ class RunManager:
             if not math.isfinite(term) or abs(term) > TERM_ABS_LIMIT:
                 raise HTTPException(422, "terms must be finite numbers within 1e9")
         return [float(t) for t in request.terms], None
+
+    @staticmethod
+    def _validate_points(
+            points: list[list[float]] | None,
+    ) -> list[tuple[float, float]]:
+        """Curve-mode target cloud: 2..200 points inside the unit square
+        (the engine normalizes nothing — the canvas already maps to [0,1]²)."""
+        if not points:
+            raise HTTPException(422, "curve mode requires points")
+        if not (MIN_POINTS <= len(points) <= MAX_POINTS):
+            raise HTTPException(422,
+                                f"curve needs {MIN_POINTS}..{MAX_POINTS} points")
+        pts: list[tuple[float, float]] = []
+        for p in points:
+            if len(p) != 2:
+                raise HTTPException(422, "each point must be [x, y]")
+            x, y = p
+            if not (math.isfinite(x) and math.isfinite(y)
+                    and 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                raise HTTPException(
+                    422, "points must be finite and lie in the unit square")
+            pts.append((float(x), float(y)))
+        return pts
 
     def control(self, action: str) -> dict:
         if self.engine is None or self.status == "idle":
@@ -374,6 +434,9 @@ class RunManager:
 
     def _save_custom_best(self) -> None:
         """Save the current best formula to history even if unsolved."""
+        # Curve runs have their own gallery (data/curves.json) and no terms.
+        if self.mode == "curve":
+            return
         if not self.engine or not self.engine.best_ever or not self.terms:
             return
         best = self.engine.best_ever
@@ -428,8 +491,10 @@ class RunManager:
         return {
             "type": "status",
             "status": self.status,
+            "mode": self.mode,
             "seed": self.engine.cfg.seed if self.engine else None,
             "sequence": self.terms,
+            "points": self.points,
             "puzzle": ({k: self.puzzle[k] for k in ("id", "tier", "name")}
                        if self.puzzle else None),
             "generation": self.engine.generation if self.engine else 0,
@@ -490,12 +555,35 @@ class RunManager:
             return
         solved = self.engine.solved
         entry = None
-        
+
         is_autopilot = self.is_autopilot
-        
-        if not solved:
+
+        if self.mode == "curve":
+            # Curve runs land in their own gallery regardless of whether the
+            # solve threshold was reached — a drawing worth keeping is often
+            # just "close". formula/formula_ast stay None so the shared
+            # broadcast block below works unchanged (the curve tab renders
+            # the pair from x_text/y_text instead).
+            entry = self.engine.best_ever.entry(with_curve=False)
+            entry.update({
+                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "points": self.points,
+                "formula": None,
+                "formula_ast": None,
+                "generations": (self.engine.solved_gen + 1
+                                if self.engine.solved_gen is not None
+                                else self.engine.generation),
+                "time_s": round(self.solved_wall_time or
+                                (time.perf_counter() - self.started_at), 3),
+                "settings": self.config_summary,
+                "seed": self.engine.cfg.seed,
+            })
+            curves = _load_json(CURVES_FILE, [])
+            curves.append(entry)
+            _save_json(CURVES_FILE, curves[-CURVES_CAP:])
+        elif not solved:
             self._save_custom_best()
-        if solved:
+        if solved and self.mode == "sequence":
             best = self.engine.shortest_exact or self.engine.best_ever
             entry = {
                 "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -535,7 +623,8 @@ class RunManager:
                 "time_s": entry["time_s"] if entry else None,
                 "hall_entry": entry,
                 "shortest_text": (to_text(self.engine.shortest_exact.node)
-                                  if self.engine.shortest_exact else None),
+                                  if getattr(self.engine, "shortest_exact", None)
+                                  else None),
                 "is_autopilot": True,
             })
             # Start the next one in the background
@@ -556,7 +645,8 @@ class RunManager:
             "time_s": entry["time_s"] if entry else None,
             "hall_entry": entry,
             "shortest_text": (to_text(self.engine.shortest_exact.node)
-                              if self.engine.shortest_exact else None),
+                              if getattr(self.engine, "shortest_exact", None)
+                              else None),
             "is_autopilot": self.is_autopilot,
         })
 
@@ -733,6 +823,11 @@ def get_hall() -> dict:
 @app.get("/api/curiosities")
 def get_curiosities() -> dict:
     return {"curiosities": _load_json(CURIOSITY_FILE, [])}
+
+
+@app.get("/api/curves")
+def get_curves() -> dict:
+    return {"curves": list(reversed(_load_json(CURVES_FILE, [])))[:CURVES_CAP]}
 
 
 @app.get("/api/settings")
