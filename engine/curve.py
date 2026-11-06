@@ -12,6 +12,11 @@ sit close to the curve (coverage — without this term a tiny circle
 somewhere inside the shape would score well). Error is normalized to
 [0, 1], so the "exact" threshold is a fraction of the domain, not an
 epsilon: curve fitting has no exact hit in the sequence sense.
+
+The nearest-point distances are computed by numpy in population-sized
+batches (one distance tensor per chunk serves both directions); without
+this the two-sided metric over hundreds of candidates x 64 samples is
+too slow in pure Python (numpy agreed as a dependency 2026-11-06).
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ import random
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+
+import numpy as np
 
 from .evaluator import BIG, compile_node
 from .fitness import INVALID_FITNESS
@@ -48,10 +55,9 @@ CURVE_SAMPLES = 64
 # "Solved" = mean two-sided distance below 2% of the unit square: visually
 # the curve hugs the drawing. Not an epsilon — fitting never hits exact.
 SOLVE_ERROR = 0.02
-# Grid cell count per axis for nearest-point lookups (32x32 over [0,1]^2):
-# turns O(N*M) brute-force distance scans into ~O(N) cell lookups, which
-# is what keeps 400 candidates x 64 samples per generation affordable.
-GRID_CELLS = 32
+# Candidates per distance-tensor chunk in the batched fitness: the
+# intermediate (chunk, 64, N_target) tensor stays ~10-30 MB.
+DIST_CHUNK = 128
 SIZE_HIST_BINS = 20
 
 
@@ -80,45 +86,9 @@ class CurveConfig:
     random_immigrants: float = 0.02
 
 
-def _cell(x: float, y: float) -> tuple[int, int]:
-    cx = min(GRID_CELLS - 1, max(0, int(x * GRID_CELLS)))
-    cy = min(GRID_CELLS - 1, max(0, int(y * GRID_CELLS)))
-    return cx, cy
-
-
-def _grid_of(points: list[tuple[float, float]]) -> dict[tuple[int, int], list[int]]:
-    grid: dict[tuple[int, int], list[int]] = {}
-    for i, (x, y) in enumerate(points):
-        grid.setdefault(_cell(x, y), []).append(i)
-    return grid
-
-
-def _nearest_in_grid(grid: dict[tuple[int, int], list[int]],
-                     points: list[tuple[float, float]],
-                     x: float, y: float) -> float:
-    """Distance from (x, y) to the closest point behind the grid: scan
-    the 3x3 cell neighborhood; when it is empty (sparse point clouds
-    leave most cells vacant) fall back to a full scan."""
-    cx, cy = _cell(x, y)
-    best = math.inf
-    for gx in range(max(0, cx - 1), min(GRID_CELLS, cx + 2)):
-        for gy in range(max(0, cy - 1), min(GRID_CELLS, cy + 2)):
-            for i in grid.get((gx, gy), ()):
-                px, py = points[i]
-                d = math.hypot(px - x, py - y)
-                if d < best:
-                    best = d
-    if best == math.inf:
-        for px, py in points:
-            d = math.hypot(px - x, py - y)
-            if d < best:
-                best = d
-    return best
-
-
 class CurveTarget:
-    """Target point cloud in the unit square; its nearest-point grid is
-    built once because the target never changes during a run."""
+    """Target point cloud in the unit square, kept as a numpy array:
+    the batched fitness measures every candidate against it at once."""
 
     def __init__(self, points: list[tuple[float, float]]):
         pts = [(float(x), float(y)) for x, y in points]
@@ -129,13 +99,15 @@ class CurveTarget:
                     and 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
                 raise ValueError("target points must lie in the unit square")
         self.points = pts
-        self._grid = _grid_of(pts)
+        self.array = np.asarray(pts, dtype=np.float64)
 
     def nearest_mean(self, points: list[tuple[float, float]]) -> float:
         """Mean distance from each given point to the closest target
-        point (the "shape fidelity" half of the fitness)."""
-        return sum(_nearest_in_grid(self._grid, self.points, x, y)
-                   for x, y in points) / len(points)
+        point (the "shape fidelity" half; kept for spot checks)."""
+        arr = np.asarray(points, dtype=np.float64)
+        diff = arr[:, None, :] - self.array[None, :, :]
+        dist = np.sqrt((diff * diff).sum(-1))
+        return float(dist.min(axis=1).mean())
 
 
 @dataclass(slots=True)
@@ -146,13 +118,15 @@ class CurveScore:
     xs: list[float] | None
     ys: list[float] | None
     size: int
+    vkey: bytes | None = None  # value-dedup key, precomputed at scoring
 
 
-def _values_key(sc: CurveScore) -> tuple:
+def _values_key(sc: CurveScore) -> tuple | bytes:
     """Dedup key from the sampled curve: comparisons stay by values, the
     same rule as the sequence engine (different trees, same curve = same
-    answer)."""
-    return tuple(round(v, 4) for v in sc.xs) + tuple(round(v, 4) for v in sc.ys)
+    answer). The key is built once per candidate by the scorer (a Python
+    round-per-value pass costs ~30% of a generation otherwise)."""
+    return sc.vkey if sc.vkey is not None else ()
 
 
 @dataclass(slots=True)
@@ -262,7 +236,12 @@ class CurveGP:
                 random_tree(self.rng, max_depth, "grow", self.ops,
                             self.funcs, self.specials))
 
-    def _score(self, pair: tuple[Node, Node], parsimony: float) -> CurveScore:
+    def _sample(self, pair: tuple[Node, Node]) -> tuple[
+            list[float] | None, list[float] | None, int]:
+        """Compile both trees and sample them at the t-grid. Returns
+        (None, None, size) on any domain/overflow problem. Pure Python —
+        each tree is a tiny distinct closure, the per-tree loop is
+        unavoidable; the expensive distance math below is batched."""
         x_tree, y_tree = pair
         size = int(weighted_size(x_tree) + weighted_size(y_tree))
         try:
@@ -274,22 +253,56 @@ class CurveGP:
                 # A fractional power of a negative base returns complex,
                 # not an exception — type-check before isfinite.
                 if isinstance(v, complex) or not math.isfinite(v) or abs(v) > BIG:
-                    return CurveScore(INVALID_FITNESS, math.inf, False,
-                                      None, None, size)
+                    return None, None, size
         except (ZeroDivisionError, OverflowError, ValueError, TypeError):
+            return None, None, size
+        return xs, ys, size
+
+    def _batch_errors(self, curves: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Two-sided nearest-point mean distances for a batch of curves.
+
+        curves: (M, CURVE_SAMPLES, 2). Squared distances expand via
+        |c-t|^2 = |c|^2 + |t|^2 - 2 c·t so the inner loop is one GEMM
+        instead of a broadcast subtract over a (chunk, 64, N, 2) tensor.
+        One (chunk, 64, N) distance tensor serves both directions: min
+        over the target axis = curve -> drawing fidelity, min over the
+        sample axis = drawing -> curve coverage. One-sided fitness would
+        reward a tiny curve hiding somewhere inside the shape.
+        """
+        target = self.target.array
+        t_sq = (target * target).sum(axis=1)
+        m = curves.shape[0]
+        d_ct = np.empty(m)
+        d_tc = np.empty(m)
+        for lo in range(0, m, DIST_CHUNK):
+            hi = min(lo + DIST_CHUNK, m)
+            flat = curves[lo:hi].reshape(-1, 2)
+            d2 = ((flat * flat).sum(axis=1)[:, None] + t_sq[None, :]
+                  - 2.0 * (flat @ target.T))
+            np.maximum(d2, 0.0, out=d2)
+            dist3 = np.sqrt(d2).reshape(hi - lo, CURVE_SAMPLES, -1)
+            d_ct[lo:hi] = dist3.min(axis=2).mean(axis=1)
+            d_tc[lo:hi] = dist3.min(axis=1).mean(axis=1)
+        return d_ct, d_tc
+
+    @staticmethod
+    def _vkey(curves: np.ndarray, index: int) -> bytes:
+        return np.round(curves[index], 4).tobytes()
+
+    def _score(self, pair: tuple[Node, Node], parsimony: float) -> CurveScore:
+        """Score a single pair (tests and spot checks); step() uses the
+        batched path — same math, same values."""
+        xs, ys, size = self._sample(pair)
+        if xs is None:
             return CurveScore(INVALID_FITNESS, math.inf, False, None, None, size)
-        points = list(zip(xs, ys, strict=True))
-        # Two-sided distance: fidelity (curve -> drawing) plus coverage
-        # (drawing -> curve). One-sided fitness rewards a tiny curve
-        # hiding somewhere inside the shape.
-        d_ct = self.target.nearest_mean(points)
-        curve_grid = _grid_of(points)
-        d_tc = sum(_nearest_in_grid(curve_grid, points, tx, ty)
-                   for tx, ty in self.target.points) / len(self.target.points)
-        error = min(1.0, 0.5 * (d_ct + d_tc))
-        exact = error < SOLVE_ERROR
+        curves = np.empty((1, CURVE_SAMPLES, 2))
+        curves[0, :, 0] = xs
+        curves[0, :, 1] = ys
+        d_ct, d_tc = self._batch_errors(curves)
+        error = min(1.0, float(0.5 * (d_ct[0] + d_tc[0])))
         fitness = (1.0 - error) - parsimony * size
-        return CurveScore(fitness, error, exact, xs, ys, size)
+        return CurveScore(fitness, error, error < SOLVE_ERROR, xs, ys, size,
+                          vkey=self._vkey(curves, 0))
 
     # -- one generation ---------------------------------------------------
 
@@ -299,11 +312,37 @@ class CurveGP:
 
     def step(self) -> CurveResult:
         started = time.perf_counter()
-        scored = []
+        # Phase 1: simplify, compile and sample — Python, per pair.
+        pairs: list[tuple[Node, Node]] = []
+        scores: list[CurveScore] = []
+        pending: list[int] = []   # indices of valid samples awaiting distances
         for pair in self.population:
             simp = (simplify(pair[0], self.ops), simplify(pair[1], self.ops))
-            scored.append((simp, self._score(simp, self.cfg.parsimony)))
-        self.population = [p for p, _ in scored]
+            pairs.append(simp)
+            xs, ys, size = self._sample(simp)
+            if xs is None:
+                scores.append(CurveScore(INVALID_FITNESS, math.inf, False,
+                                         None, None, size))
+            else:
+                pending.append(len(scores))
+                scores.append(CurveScore(0.0, 0.0, False, xs, ys, size))
+        # Phase 2: all nearest-point distances in one numpy batch.
+        if pending:
+            curves = np.empty((len(pending), CURVE_SAMPLES, 2))
+            for k, i in enumerate(pending):
+                curves[k, :, 0] = scores[i].xs
+                curves[k, :, 1] = scores[i].ys
+            d_ct, d_tc = self._batch_errors(curves)
+            parsimony = self.cfg.parsimony
+            for k, i in enumerate(pending):
+                sc = scores[i]
+                error = min(1.0, 0.5 * (float(d_ct[k]) + float(d_tc[k])))
+                scores[i] = CurveScore(
+                    (1.0 - error) - parsimony * sc.size, error,
+                    error < SOLVE_ERROR, sc.xs, sc.ys, sc.size,
+                    vkey=self._vkey(curves, k))
+        scored = list(zip(pairs, scores, strict=True))
+        self.population = pairs
 
         stats = self._stats(scored)
 

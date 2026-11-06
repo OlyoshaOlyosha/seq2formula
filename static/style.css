@@ -1143,3 +1143,15 @@ input[type="range"] {
   .curves-grid { grid-template-columns: 1fr; }
   #curveCanvas { max-width: 100%; }
 }
+
+#curveCanvas.locked { cursor: not-allowed; }
+
+.preset-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.preset-row .ops-label { margin-right: 4px; }
+.preset-btn { padding: 4px 10px; font-size: 13px; }

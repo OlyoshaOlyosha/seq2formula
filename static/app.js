@@ -849,6 +849,76 @@ const SOLVE_ERROR_JS = 0.02;
 const CURVE_STROKE_POINTS = 64;   // matches CURVE_SAMPLES on the engine
 const MAX_CURVE_POINTS = 200;     // server-side cap, mirrored here
 
+/* Evenly spaced points along a polyline (proportional to segment
+   length) — the building block for the one-stroke preset shapes. */
+function alongPath(vertices, n) {
+  let len = 0;
+  for (let i = 1; i < vertices.length; i++) {
+    len += Math.hypot(vertices[i].x - vertices[i - 1].x,
+                      vertices[i].y - vertices[i - 1].y);
+  }
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const target = (len * k) / (n - 1);
+    let acc = 0;
+    for (let i = 1; i < vertices.length; i++) {
+      const dx = vertices[i].x - vertices[i - 1].x;
+      const dy = vertices[i].y - vertices[i - 1].y;
+      const d = Math.hypot(dx, dy);
+      if (acc + d >= target || i === vertices.length - 1) {
+        const t = d === 0 ? 0 : (target - acc) / d;
+        out.push({ x: vertices[i - 1].x + dx * t,
+                   y: vertices[i - 1].y + dy * t });
+        break;
+      }
+      acc += d;
+    }
+  }
+  return out;
+}
+
+/* One-stroke shape presets, same idea as the puzzle library in
+   «Результаты» but for curves. Coordinates: unit square, y down. */
+const CURVE_PRESETS = [
+  { name: "Линия", pts: alongPath([{ x: 0.12, y: 0.5 }, { x: 0.88, y: 0.5 }], 30) },
+  { name: "Угол", pts: alongPath([{ x: 0.2, y: 0.15 }, { x: 0.2, y: 0.85 },
+                                  { x: 0.85, y: 0.85 }], 48) },
+  { name: "Окружность", pts: Array.from({ length: 48 }, (_, i) => {
+      const a = -Math.PI / 2 + (i / 47) * 2 * Math.PI;
+      return { x: 0.5 + 0.35 * Math.cos(a), y: 0.5 + 0.35 * Math.sin(a) };
+    }) },
+  { name: "Волна", pts: Array.from({ length: 60 }, (_, i) => {
+      const t = i / 59;
+      return { x: 0.1 + 0.8 * t, y: 0.5 + 0.25 * Math.sin(4 * Math.PI * t) };
+    }) },
+  { name: "Зигзаг", pts: alongPath([{ x: 0.1, y: 0.25 }, { x: 0.3, y: 0.75 },
+                                    { x: 0.5, y: 0.25 }, { x: 0.7, y: 0.75 },
+                                    { x: 0.9, y: 0.25 }], 60) },
+  { name: "Спираль", pts: Array.from({ length: 90 }, (_, i) => {
+      const t = i / 89;
+      const a = -Math.PI / 2 + t * 2.5 * 2 * Math.PI;
+      const r = 0.04 + 0.32 * t;
+      return { x: 0.5 + r * Math.cos(a), y: 0.5 + r * Math.sin(a) };
+    }) },
+  { name: "Звезда", pts: (() => {
+      const v = [];
+      for (let k = 0; k < 10; k++) {
+        const a = -Math.PI / 2 + k * Math.PI / 5;
+        const r = k % 2 === 0 ? 0.38 : 0.16;
+        v.push({ x: 0.5 + r * Math.cos(a), y: 0.5 + r * Math.sin(a) });
+      }
+      v.push({ ...v[0] });  // closed outline, still one stroke
+      return alongPath(v, 70);
+    })() },
+  { name: "Сердце", pts: Array.from({ length: 60 }, (_, i) => {
+      const th = (i / 59) * 2 * Math.PI;
+      // classic heart curve, rescaled to the unit square (y down)
+      return { x: 0.5 + 0.02 * 16 * Math.sin(th) ** 3,
+               y: 0.35 - 0.02 * (13 * Math.cos(th) - 5 * Math.cos(2 * th)
+                 - 2 * Math.cos(3 * th) - Math.cos(4 * th)) };
+    }) },
+];
+
 function resetCurveState() {
   state.curveBuf = { gen: [], bestE: [], meanE: [] };
   state.curveBestCurve = null;
@@ -866,6 +936,9 @@ function syncCurveUI() {
   const running = state.status === "running" || state.status === "paused";
   $("curveStartBtn").disabled = running || state.curvePoints.length < 2;
   $("curveStopBtn").disabled = !running;
+  // the target is baked into the engine at start — no edits mid-run
+  $("curveClearBtn").disabled = running;
+  $("curveCanvas").classList.toggle("locked", running);
   const chip = $("curveChip");
   if (state.status === "running") chip.textContent = "поиск идёт";
   else if (state.status === "paused") chip.textContent = "пауза";
@@ -912,6 +985,9 @@ function resampleStroke(raw) {
 function initCurveCanvas() {
   const canvas = $("curveCanvas");
 
+  const editable = () =>
+    state.status !== "running" && state.status !== "paused";
+
   const toUnit = (e) => {
     const rect = canvas.getBoundingClientRect();
     return {
@@ -921,13 +997,14 @@ function initCurveCanvas() {
   };
 
   canvas.addEventListener("pointerdown", (e) => {
+    if (!editable()) return;
     canvas.setPointerCapture(e.pointerId);
     state.curveDrawing = true;
     state.curveStroke = [toUnit(e)];
     drawCurveCanvas();
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (!state.curveDrawing) return;
+    if (!state.curveDrawing || !editable()) return;
     state.curveStroke.push(toUnit(e));
     drawCurveCanvas();
   });
@@ -2276,6 +2353,22 @@ function bindControls() {
     const cleaned = e.target.value.replace(/\D/g, "");
     if (cleaned !== e.target.value) e.target.value = cleaned;
   });
+  // one-stroke shape presets: click = the drawing appears on the canvas
+  const presetRow = $("presetRow");
+  for (const preset of CURVE_PRESETS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn preset-btn";
+    btn.textContent = preset.name;
+    btn.addEventListener("click", () => {
+      if (state.status === "running" || state.status === "paused") return;
+      state.curvePoints = preset.pts.map((p) => ({ ...p }));
+      state.curveBestCurve = null;
+      drawCurveCanvas();
+      syncCurveUI();
+    });
+    presetRow.appendChild(btn);
+  }
   $("bestFormula").addEventListener("click", copyBestFormula);
   $("bestFormula").addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {

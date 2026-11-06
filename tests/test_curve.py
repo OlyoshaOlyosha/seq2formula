@@ -5,14 +5,7 @@ import random
 
 import pytest
 
-from engine.curve import (
-    SOLVE_ERROR,
-    CurveConfig,
-    CurveGP,
-    CurveTarget,
-    _grid_of,
-    _nearest_in_grid,
-)
+from engine.curve import CURVE_SAMPLES, SOLVE_ERROR, CurveConfig, CurveGP, CurveTarget
 from engine.fitness import INVALID_FITNESS
 from engine.nodes import BinOp, Const, Var
 
@@ -27,17 +20,23 @@ def test_target_validation() -> None:
         CurveTarget([(0.5, 0.5), (1.5, 0.1)])
 
 
-def test_nearest_grid_matches_bruteforce() -> None:
+def test_score_matches_bruteforce() -> None:
+    """The batched numpy fitness must agree with a plain brute-force
+    two-sided nearest-point scan (Var() evaluates to t, so the pair
+    (n, n) samples the diagonal)."""
     rng = random.Random(7)
     pts = [(rng.random(), rng.random()) for _ in range(40)]
-    target = CurveTarget(pts)
-    grid = _grid_of(pts)
-    for _ in range(200):
-        x, y = rng.random(), rng.random()
-        expected = min(math.hypot(px - x, py - y) for px, py in pts)
-        assert _nearest_in_grid(grid, pts, x, y) == pytest.approx(
-            expected, abs=1e-12)
-        assert target.nearest_mean([(x, y)]) == pytest.approx(expected)
+    eng = CurveGP(pts, CurveConfig(seed=1))
+    sc = eng._score((Var(), Var()), 0.0)
+    curve = [(i / (CURVE_SAMPLES - 1), i / (CURVE_SAMPLES - 1))
+             for i in range(CURVE_SAMPLES)]
+    d_ct = sum(min(math.hypot(px - cx, py - cy) for px, py in pts)
+               for cx, cy in curve) / CURVE_SAMPLES
+    d_tc = sum(min(math.hypot(px - cx, py - cy) for cx, cy in curve)
+               for px, py in pts) / len(pts)
+    assert sc.error == pytest.approx(min(1.0, 0.5 * (d_ct + d_tc)), abs=1e-9)
+    assert eng.target.nearest_mean([(0.4, 0.6)]) == pytest.approx(
+        min(math.hypot(px - 0.4, py - 0.6) for px, py in pts))
 
 
 def test_invalid_pair_scores_invalid() -> None:
