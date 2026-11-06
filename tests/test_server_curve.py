@@ -51,9 +51,9 @@ def test_curve_run_runs_and_lands_in_gallery(
     curves = json.loads((tmp_path / "curves.json").read_text(encoding="utf-8"))
     assert len(curves) == 1
     entry = curves[0]
-    for key in ("ts", "points", "x_text", "x_ast", "y_text", "y_ast",
-                "error", "generations", "time_s", "settings", "seed",
-                "formula", "formula_ast", "solved"):
+    for key in ("ts", "points", "preset", "x_text", "x_ast", "y_text",
+                "y_ast", "error", "generations", "time_s", "settings",
+                "seed", "formula", "formula_ast", "solved"):
         assert key in entry
     assert entry["points"] == LINE
     assert entry["x_text"] and entry["y_text"]

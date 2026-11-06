@@ -38,6 +38,11 @@ const state = {
   curveSolved: false,
   curveRafPending: false,
   lastCurveTexts: "",
+  curveLog: [],            // curve race log entries, newest first
+  curvePreset: null,       // name of the loaded preset shape (or null)
+  lastCurveTopUpdate: 0,   // throttle the curve top list
+  wasCurveShocking: false, // dedupe shock entries in the curve race log
+  lastCurveLogGen: null,   // throttle "new best" entries
 };
 
 /* ---------- formatting ---------- */
@@ -305,6 +310,29 @@ function makeCharts() {
                       values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
     [[], [], []], $("chartCurveError"));
 
+  // curve mode: full stat parity with Поиск
+  state.charts.curveFitness = new uPlot({ ...common }, [[], [], []],
+    $("chartCurveFitness"));
+
+  state.charts.curveDiversity = new uPlot(
+    { ...baseOpts(140, [
+        { label: "поколение" },
+        { ...lineSeries("разнообразие", CHART_COLORS.teal), width: 1.5 },
+      ], false),
+      scales: { x: { time: false } },
+      axes: [axisX, { ...axisOpts(2), label: "доля уникальных" }] },
+    [[], []], $("chartCurveDiversity"));
+
+  state.charts.curveSizes = new uPlot(
+    { ...baseOpts(140, [
+        { label: "размер" },
+        { label: "пар", stroke: CHART_COLORS.accent, width: 2,
+          points: { show: false }, paths: barsPath, fill: "rgba(139,147,248,0.18)" },
+      ], false),
+      scales: { x: { time: false } },
+      axes: [{ ...axisX, label: "размер пары" }, { ...axisOpts(), label: "кол-во пар" }] },
+    [[], []], $("chartCurveSizes"));
+
   resizeCharts();
 }
 
@@ -313,6 +341,8 @@ function resizeCharts() {
     ["fitness", "chartFitness"], ["error", "chartError"],
     ["diversity", "chartDiversity"], ["sizes", "chartSizes"],
     ["hero", "heroChart"], ["curveError", "chartCurveError"],
+    ["curveFitness", "chartCurveFitness"],
+    ["curveDiversity", "chartCurveDiversity"], ["curveSizes", "chartCurveSizes"],
   ];
   for (const [key, id] of boxes) {
     const el = $(id);
@@ -846,7 +876,8 @@ function applyStatusMsg(msg) {
 /* Mirror of engine/curve.py SOLVE_ERROR: "solved" = mean two-sided
    distance below 2% of the unit square. */
 const SOLVE_ERROR_JS = 0.02;
-const CURVE_STROKE_POINTS = 64;   // matches CURVE_SAMPLES on the engine
+const CURVE_SAMPLES_JS = 64;      // mirror of engine CURVE_SAMPLES
+const CURVE_STROKE_POINTS = 64;   // stroke resample target (same number)
 const MAX_CURVE_POINTS = 200;     // server-side cap, mirrored here
 
 /* Evenly spaced points along a polyline (proportional to segment
@@ -920,14 +951,24 @@ const CURVE_PRESETS = [
 ];
 
 function resetCurveState() {
-  state.curveBuf = { gen: [], bestE: [], meanE: [] };
+  state.curveBuf = {
+    gen: [], bestF: [], meanF: [], bestE: [], meanE: [], div: [],
+    sizesX: [], sizesY: [],
+  };
   state.curveBestCurve = null;
   state.curveSolved = false;
   state.lastCurveTexts = "";
+  state.curveLog = [];
+  state.lastCurveTopUpdate = 0;
+  state.wasCurveShocking = false;
+  state.lastCurveLogGen = null;
   state.genTimestamps = [];
   state.lastGenNum = null;
   if (state.charts.curveError) state.charts.curveError.setData([[], [], []]);
-  drawCurveCanvas();
+  if (state.charts.curveFitness) state.charts.curveFitness.setData([[], [], []]);
+  if (state.charts.curveDiversity) state.charts.curveDiversity.setData([[], []]);
+  if (state.charts.curveSizes) state.charts.curveSizes.setData([[], []]);
+  renderCurveLog();
 }
 
 /* Enable/disable the curve controls and keep the pane visible exactly
@@ -1020,6 +1061,7 @@ function initCurveCanvas() {
       }
       state.curvePoints.push(p);
     }
+    state.curvePreset = null;  // hand-drawn now, not a preset
     syncCurveUI();
     drawCurveCanvas();
   };
@@ -1077,8 +1119,13 @@ function applyCurveGen(msg) {
   if (!b) return;
   b.gen.push(msg.gen);
   const s = msg.stats;
+  b.bestF.push(s.best_fitness);
+  b.meanF.push(s.mean_fitness);
   b.bestE.push(s.best_error === null ? null : s.best_error);
   b.meanE.push(s.mean_error === null ? null : s.mean_error);
+  b.div.push(s.diversity);
+  b.sizesX = s.size_hist.map((_, i) => i + 1);
+  b.sizesY = s.size_hist;
 
   $("curveGen").textContent = String(msg.gen + 1);
   const errEl = $("curveError");
@@ -1110,9 +1157,149 @@ function applyCurveGen(msg) {
   if (msg.best.solved) sub.push('<span class="ok">порог взят</span>');
   $("curveSub").innerHTML = sub.join(" · ");
 
+  // top-5 pairs: throttled like the sequence race list
+  if (now - state.lastCurveTopUpdate > 300 || msg.solved_now || msg.solved) {
+    renderCurveTop(msg.top || []);
+    state.lastCurveTopUpdate = now;
+  }
+  updateCurveRaceLog(msg);
+  renderCurveCheck(msg.best);
+
   state.curveSolved = msg.solved;
   state.curveBestCurve = msg.best.curve;
   scheduleCurveUpdate();
+}
+
+/* Curve-mode top list: each entry is a PAIR of formulas. */
+function renderCurveTop(top) {
+  const list = $("curveRaceList");
+  list.innerHTML = "";
+  top.forEach((item, i) => {
+    const li = document.createElement("li");
+    li.className = "race-item" + (i === 0 ? " leader" : "");
+    const place = document.createElement("span");
+    place.className = "race-place num";
+    place.textContent = String(i + 1);
+    li.appendChild(place);
+    const f = document.createElement("span");
+    f.className = "race-formula curve-race-formula";
+    renderKatex(f, `x(t)=${astToLatexT(item.x_ast)}`, false);
+    const f2 = document.createElement("span");
+    f2.className = "race-formula curve-race-formula";
+    renderKatex(f2, `y(t)=${astToLatexT(item.y_ast)}`, false);
+    li.appendChild(f);
+    li.appendChild(f2);
+    const meta = document.createElement("span");
+    meta.className = "race-meta num";
+    meta.textContent = `ошибка ${fmtPercent(item.error)} · разм ${item.size}`;
+    li.appendChild(meta);
+    list.appendChild(li);
+  });
+}
+
+/* Curve race log: same feed style as Поиск, curve-specific events. */
+function pushCurveLogEntry(parts) {
+  parts.gen = state.lastGenNum;
+  state.curveLog.unshift(parts);
+  if (state.curveLog.length > 7) state.curveLog.pop();
+  renderCurveLog();
+}
+
+function renderCurveLog() {
+  const list = $("curveRaceLog");
+  if (!list) return;
+  list.innerHTML = "";
+  state.curveLog.forEach((e) => {
+    const li = document.createElement("li");
+    li.className = "race-log-item" + (e.cls ? " " + e.cls : "");
+    const g = document.createElement("span");
+    g.className = "race-log-gen num";
+    g.textContent = e.gen === null || e.gen === undefined
+      ? "—" : "пок. " + (e.gen + 1);
+    li.appendChild(g);
+    if (e.pre) {
+      const pre = document.createElement("span");
+      pre.textContent = e.pre + " ";
+      li.appendChild(pre);
+    }
+    if (e.latex) {
+      const f = document.createElement("span");
+      f.className = "race-log-formula";
+      renderKatex(f, e.latex, false);
+      li.appendChild(f);
+    }
+    if (e.text) {
+      const t = document.createElement("span");
+      t.textContent = e.latex ? " " + e.text : e.text;
+      li.appendChild(t);
+    }
+    list.appendChild(li);
+  });
+}
+
+function updateCurveRaceLog(msg) {
+  state.lastGenNum = msg.gen;
+  if (msg.shock && !state.wasCurveShocking) {
+    const top = state.curveLog[0];
+    if (top && top.cls === "log-shock") {
+      top.gen = msg.gen;
+      renderCurveLog();
+    } else {
+      pushCurveLogEntry({
+        pre: "встряска: подмешаны свежие пары",
+        cls: "log-shock",
+      });
+    }
+  }
+  state.wasCurveShocking = msg.shock;
+  if (msg.solved_now) {
+    pushCurveLogEntry({ pre: "порог взят (ошибка < 2%)", cls: "log-solved" });
+  } else if (msg.new_best) {
+    // throttle like Поиск: a 100 gen/s run must not blur the feed
+    if (!state.lastCurveLogGen || msg.gen - state.lastCurveLogGen >= 10) {
+      pushCurveLogEntry({
+        pre: "новая лучшая пара:",
+        latex: `x(t)=${astToLatexT(msg.best.x_ast)},\\ y(t)=${astToLatexT(msg.best.y_ast)}`,
+        text: `ошибка ${fmtPercent(msg.best.error)}`,
+      });
+      state.lastCurveLogGen = msg.gen;
+    }
+  }
+}
+
+/* Per-t check table, the curve analog of «Проверка формулы по числам». */
+const CURVE_CHECK_TS = [0, 0.2, 0.4, 0.6, 0.8, 1];
+
+function renderCurveCheck(best) {
+  const head = $("curveTermsHead");
+  head.innerHTML = "";
+  addCell(head, "th", "t");
+  for (const t of CURVE_CHECK_TS) addCell(head, "th", fmtNum(t));
+
+  const idx = (t) => Math.round(t * (CURVE_SAMPLES_JS - 1));
+  const curve = best.curve;
+  const errCells = [];
+  const xs = CURVE_CHECK_TS.map((t) =>
+    curve && curve.xs ? fmtNum(curve.xs[idx(t)]) : "—");
+  const ys = CURVE_CHECK_TS.map((t) =>
+    curve && curve.ys ? fmtNum(curve.ys[idx(t)]) : "—");
+  buildTermsRow($("curveTermsX"), "x(t)", xs);
+  buildTermsRow($("curveTermsY"), "y(t)", ys);
+  const errs = CURVE_CHECK_TS.map((t) => {
+    if (!curve || !curve.xs) return "—";
+    const cx = curve.xs[idx(t)], cy = curve.ys[idx(t)];
+    let d = Infinity;
+    for (const p of state.curvePoints) {
+      d = Math.min(d, Math.hypot(p.x - cx, p.y - cy));
+    }
+    return fmtPercent(Math.min(1, d));
+  });
+  buildTermsRow($("curveTermsErr"), "промах", errs, errCells);
+  errs.forEach((e, i) => {
+    if (curve && curve.xs && parseFloat(e.replace("%", "")) < 2) {
+      errCells[i].classList.add("ok");
+    }
+  });
 }
 
 function scheduleCurveUpdate() {
@@ -1121,8 +1308,19 @@ function scheduleCurveUpdate() {
   requestAnimationFrame(() => {
     state.curveRafPending = false;
     const b = state.curveBuf;
-    if (b && state.charts.curveError) {
-      state.charts.curveError.setData([b.gen, b.bestE, b.meanE]);
+    if (b) {
+      if (state.charts.curveError) {
+        state.charts.curveError.setData([b.gen, b.bestE, b.meanE]);
+      }
+      if (state.charts.curveFitness) {
+        state.charts.curveFitness.setData([b.gen, b.bestF, b.meanF]);
+      }
+      if (state.charts.curveDiversity) {
+        state.charts.curveDiversity.setData([b.gen, b.div]);
+      }
+      if (state.charts.curveSizes) {
+        state.charts.curveSizes.setData([b.sizesX, b.sizesY]);
+      }
     }
     drawCurveCanvas();
   });
@@ -1176,6 +1374,7 @@ async function startCurveRun(event) {
   const body = {
     mode: "curve",
     points,
+    preset: state.curvePreset,
     speed: Number($("speedRange").value),
     ops: [...state.ops],
     seed,
@@ -1224,6 +1423,7 @@ async function loadCurves() {
       state.curvePoints = c.points.map(([x, y]) => ({ x, y }));
       state.curveBestCurve = null;
       state.curveSolved = false;
+      state.curvePreset = c.preset || null;
       drawCurveCanvas();
       syncCurveUI();
     });
@@ -1821,6 +2021,66 @@ async function loadCuriosities() {
   }
 }
 
+/* Shape presets table: best curve run per preset (like «Библиотека»,
+   but for the Кривые tab). Click = load the drawing onto the canvas. */
+async function loadShapes() {
+  const data = await api("/api/curves");
+  const rows = $("shapeRows");
+  rows.innerHTML = "";
+  const best = {};
+  for (const c of data.curves) {
+    if (!c.preset) continue;
+    const current = best[c.preset];
+    if (!current || (c.error !== null && c.error < current.error)) {
+      best[c.preset] = c;
+    }
+  }
+  for (const preset of CURVE_PRESETS) {
+    const c = best[preset.name];
+    const tr = document.createElement("tr");
+    tr.className = "clickable-row";
+    tr.title = "Открыть эту фигуру на вкладке «Кривые»";
+    tr.addEventListener("click", () => {
+      state.curvePoints = (c ? c.points : preset.pts).map((p) =>
+        Array.isArray(p) ? { x: p[0], y: p[1] } : { ...p });
+      state.curveBestCurve = null;
+      state.curveSolved = false;
+      state.curvePreset = preset.name;
+      drawCurveCanvas();
+      syncCurveUI();
+      $("ptabCurves").click();
+    });
+
+    const name = document.createElement("td");
+    name.textContent = preset.name;
+    tr.appendChild(name);
+
+    const result = document.createElement("td");
+    if (c) {
+      renderKatex(result, `x(t)=${astToLatexT(c.x_ast)},\\ y(t)=${astToLatexT(c.y_ast)}`, false);
+      result.className = c.solved ? "solved-text" : "amber-text";
+    } else {
+      result.textContent = "—";
+      result.style.color = "var(--faint)";
+    }
+    tr.appendChild(result);
+
+    const err = document.createElement("td");
+    if (c) {
+      err.textContent = fmtPercent(c.error);
+      err.className = "num " + (c.solved ? "solved-text" : "amber-text");
+    } else {
+      err.textContent = "—";
+      err.className = "num";
+    }
+    tr.appendChild(err);
+
+    addCell(tr, "td", c ? String(c.generations) : "—", "num");
+    addCell(tr, "td", c ? fmtTime(c.time_s) : "—", "num");
+    rows.appendChild(tr);
+  }
+}
+
 function highlightActiveRow() {
   document.querySelectorAll("tbody tr").forEach(tr => tr.classList.remove("active-autopilot"));
   if (state.status === "running" && state.mode === "sequence" && state.puzzleTerms) {
@@ -1868,7 +2128,8 @@ function refreshAll() {
     loadMySeqs().catch(() => {}),
     loadCuriosities().catch(() => {}),
     loadStats().catch(() => {}),
-    loadCurves().catch(() => {})
+    loadCurves().catch(() => {}),
+    loadShapes().catch(() => {})
   ]).then(() => {
     applyTableFilter();
     highlightActiveRow();
@@ -2039,6 +2300,7 @@ async function copyBestFormula() {
 
 const RESULT_META = {
   library: "Все последовательности из библиотеки: эталон и лучший найденный результат (зелёный — решено, оранжевый — пока только приближение)",
+  shapes: "Фигуры-заготовки из вкладки «Кривые»: лучший результат по каждой (клик — вернуть рисунок на холст)",
   myseqs: "Введённые вами последовательности, лучшие найденные формулы и ошибки",
   curio: "Почти правильные, но громоздкие монстры — следы блуждания эволюции",
 };
@@ -2346,6 +2608,7 @@ function bindControls() {
     state.curvePoints = [];
     state.curveStroke = [];
     state.curveBestCurve = null;
+    state.curvePreset = null;
     drawCurveCanvas();
     syncCurveUI();
   });
@@ -2364,6 +2627,7 @@ function bindControls() {
       if (state.status === "running" || state.status === "paused") return;
       state.curvePoints = preset.pts.map((p) => ({ ...p }));
       state.curveBestCurve = null;
+      state.curvePreset = preset.name;
       drawCurveCanvas();
       syncCurveUI();
     });
@@ -2384,6 +2648,7 @@ function bindControls() {
   });
 
   const tabs = [["tabLibrary", "libraryTable", "library"],
+                ["tabShapes", "shapeTable", "shapes"],
                 ["tabMySeqs", "mySeqTable", "myseqs"],
                 ["tabCurio", "curioTable", "curio"]];
   for (const [tabId, bodyId, metaKey] of tabs) {
@@ -2510,6 +2775,10 @@ function bindControls() {
       return;
     }
 
+    // The shapes table has no autopilot rows; with it open the sequence
+    // tables are both hidden and would silently drive the queue.
+    if (!$("shapeTable").hidden) return;
+
     const isLibrary = !$("libraryTable").hidden;
     const table = isLibrary ? $("libraryTable") : $("mySeqTable");
     
@@ -2610,7 +2879,8 @@ function bindControls() {
   // changes and pane switches); window resize alone misses both
   const ro = new ResizeObserver(resizeCharts);
   for (const id of ["chartFitness", "chartError", "chartDiversity", "chartSizes",
-                    "heroChart", "chartCurveError"]) {
+                    "heroChart", "chartCurveError", "chartCurveFitness",
+                    "chartCurveDiversity", "chartCurveSizes"]) {
     ro.observe($(id));
   }
 

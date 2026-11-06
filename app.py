@@ -146,6 +146,7 @@ class RunRequest(BaseModel):
     mode: str = Field(default="sequence", pattern="^(sequence|curve)$")
     terms: list[float] | None = None
     points: list[list[float]] | None = None  # curve mode: target cloud
+    preset: str | None = Field(default=None, max_length=40)  # shape preset name
     puzzle_id: str | None = None
     population: int | None = Field(default=None, ge=20, le=2000)
     parsimony: float | None = Field(default=None, ge=0.0, le=0.1)
@@ -208,6 +209,7 @@ class RunManager:
         self.mode: str = "sequence"  # sequence | curve
         self.terms: list[float] = []
         self.points: list[list[float]] | None = None
+        self.curve_preset: str | None = None
         self.last_gen: dict | None = None
         self.finish_reason: str | None = None
         self.config_summary: dict = {}
@@ -277,6 +279,7 @@ class RunManager:
             self.engine = CurveGP(self._validate_points(request.points), config)
             self.points = request.points
             self.terms = []
+            self.curve_preset = request.preset
         else:
             config = GPConfig(
                 **common,
@@ -568,6 +571,7 @@ class RunManager:
             entry.update({
                 "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "points": self.points,
+                "preset": self.curve_preset,
                 "formula": None,
                 "formula_ast": None,
                 "generations": (self.engine.solved_gen + 1

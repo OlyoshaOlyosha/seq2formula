@@ -1155,3 +1155,7 @@ input[type="range"] {
 }
 .preset-row .ops-label { margin-right: 4px; }
 .preset-btn { padding: 4px 10px; font-size: 13px; }
+
+/* curve tab stat parity */
+.curve-race-formula { margin-right: 10px; }
+.curve-hero .hero-formula { margin-bottom: 6px; }
