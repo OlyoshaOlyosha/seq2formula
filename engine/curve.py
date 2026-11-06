@@ -1,17 +1,19 @@
 """Curve-fitting GP engine ("Кривые" mode).
 
-Evolves a PAIR of formula trees x(t), y(t) per candidate; the parametric
-curve sampled at t in [0, 1] must trace a target point cloud drawn in the
-unit square. The GP machinery (grammar, crossover, mutations, repairs,
-shocks) is reused from the sequence engine unchanged — only the genome
-and the fitness differ.
+Evolves a PAIR of formula trees x(t), y(t) per stroke: a drawing made of
+K strokes gets K independent pairs, and the parametric curve of pair k
+(64 samples of t in [0, 1]) must trace stroke k. A single continuous
+pair can never cover disjoint strokes (a smiley), which is why the
+genome carries one pair per stroke. A flat point list is accepted as a
+single stroke, so one-stroke runs look exactly like the original API.
 
-Fitness is a two-sided nearest-point distance: every curve point should
-sit close to the drawing (shape fidelity) AND every drawn point should
-sit close to the curve (coverage — without this term a tiny circle
-somewhere inside the shape would score well). Error is normalized to
-[0, 1], so the "exact" threshold is a fraction of the domain, not an
-epsilon: curve fitting has no exact hit in the sequence sense.
+Fitness is the mean over strokes of a two-sided nearest-point distance:
+every curve point should sit close to its stroke (shape fidelity) AND
+every stroke point should sit close to the curve (coverage — without
+this term a tiny curve hiding inside the shape would score well). Error
+is normalized to [0, 1], so the "exact" threshold is a fraction of the
+domain, not an epsilon: curve fitting has no exact hit in the sequence
+sense.
 
 The nearest-point distances are computed by numpy in population-sized
 batches (one distance tensor per chunk serves both directions); without
@@ -36,11 +38,15 @@ from .grammar import (
     crossover,
     initial_population,
     point_mutation,
+    random_path,
     random_tree,
+    replace_subtree,
+    subtree_at,
     subtree_mutation,
 )
 from .nodes import (
     UNARY_FUNCS,
+    Const,
     Node,
     simplify,
     special_value,
@@ -49,9 +55,13 @@ from .nodes import (
     weighted_size,
 )
 
-# Curve points sampled per candidate: enough to trace any single stroke
-# smoothly, small enough that 400 candidates per generation stay fast.
-CURVE_SAMPLES = 64
+# Curve points sampled per candidate. 128, not 64: the coverage half of
+# the fitness (target point -> nearest SAMPLE) has a granularity floor
+# of ~half the sample spacing, and at 64 samples that floor (~0.02 of
+# the unit square on a radius-0.4 circle) sat right AT the solve
+# threshold — the perfect answer could not cross it. numpy batches keep
+# 128 affordable.
+CURVE_SAMPLES = 128
 # "Solved" = mean two-sided distance below 2% of the unit square: visually
 # the curve hugs the drawing. Not an epsilon — fitting never hits exact.
 SOLVE_ERROR = 0.02
@@ -59,20 +69,37 @@ SOLVE_ERROR = 0.02
 # intermediate (chunk, 64, N_target) tensor stays ~10-30 MB.
 DIST_CHUNK = 128
 SIZE_HIST_BINS = 20
+# Hard cap on strokes per drawing: init/scoring cost scales linearly
+# with the stroke count, and a smiley needs 4.
+MAX_STROKES = 6
+# Curve targets live in the unit square, so the search needs fractional
+# building blocks (stroke offsets like 0.25, affine maps like 0.1+0.8t)
+# that the integer-oriented grammar can otherwise only assemble through
+# division chains. They are injected into the specials pool, i.e. drawn
+# like pi/e (SPECIAL_CONST_P per constant node) and cost weight 1
+# (const_weight treats values < 1 as primitives).
+CURVE_CONSTS = (0.1, 0.2, 0.25, 0.4, 0.6, 0.75, 0.8, 0.9, 1 / 3, 2 / 3)
+# tau = 2*pi: with t in [0, 1] the full trig period needs 2*pi*t INSIDE
+# sin/cos — a deep, rarely-assembled structure. tau*n is three nodes and
+# makes the whole sin/cos family (circle, wave, star of Lissajous)
+# directly reachable. Excluded from the gaussian tweak like pi/e.
+CURVE_TAU = 2.0 * math.pi
 
 
 @dataclass(slots=True)
 class CurveConfig:
     # Mirrors GPConfig; curve fitting differs only in max_depth (two trees
-    # per candidate breed twice the size) and a stronger parsimony default
-    # (an unpenalized pair drifts into wiggly monsters fast).
+    # per candidate per stroke breed twice the size) and a much weaker
+    # parsimony: a correct pair (circle) is 15+ nodes, and at the sequence
+    # penalty 0.01 the 1-node diagonal beats it FOREVER on fitness — the
+    # search never leaves degenerate shortcuts like x=t, y=t.
     population: int = 400
     max_depth: int = 5
     tournament: int = 3
     p_crossover: float = 1.0
     p_mutate: float = 0.25
     elitism: int = 2
-    parsimony: float = 0.01
+    parsimony: float = 0.001
     max_generations: int = 10000
     seed: int | None = None
     allowed_ops: tuple[str, ...] | None = None
@@ -87,22 +114,22 @@ class CurveConfig:
 
 
 class CurveTarget:
-    """Target point cloud in the unit square, kept as a numpy array:
-    the batched fitness measures every candidate against it at once."""
+    """One stroke's point cloud in the unit square, kept as a numpy
+    array: the batched fitness measures every candidate against it."""
 
     def __init__(self, points: list[tuple[float, float]]):
         pts = [(float(x), float(y)) for x, y in points]
         if len(pts) < 2:
-            raise ValueError("a curve target needs at least 2 points")
+            raise ValueError("a curve stroke needs at least 2 points")
         for x, y in pts:
             if not (math.isfinite(x) and math.isfinite(y)
                     and 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
-                raise ValueError("target points must lie in the unit square")
+                raise ValueError("stroke points must lie in the unit square")
         self.points = pts
         self.array = np.asarray(pts, dtype=np.float64)
 
     def nearest_mean(self, points: list[tuple[float, float]]) -> float:
-        """Mean distance from each given point to the closest target
+        """Mean distance from each given point to the closest stroke
         point (the "shape fidelity" half; kept for spot checks)."""
         arr = np.asarray(points, dtype=np.float64)
         diff = arr[:, None, :] - self.array[None, :, :]
@@ -110,20 +137,41 @@ class CurveTarget:
         return float(dist.min(axis=1).mean())
 
 
+def normalize_strokes(
+        strokes: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Accept a list of strokes or one flat point list (back-compat);
+    single-point strokes are padded to two identical points so a click
+    stays a valid target. Enforces the stroke cap."""
+    if not strokes:
+        raise ValueError("a curve target needs at least one stroke")
+    if isinstance(strokes[0][0], (int, float)):
+        strokes = [strokes]  # flat point list -> single stroke
+    if not (1 <= len(strokes) <= MAX_STROKES):
+        raise ValueError(f"a drawing supports 1..{MAX_STROKES} strokes")
+    out: list[list[tuple[float, float]]] = []
+    for stroke in strokes:
+        pts = [(float(x), float(y)) for x, y in stroke]
+        if len(pts) == 1:
+            pts = [pts[0], pts[0]]
+        out.append(pts)
+    return out
+
+
 @dataclass(slots=True)
 class CurveScore:
     fitness: float
     error: float          # mean two-sided distance in [0, 1]; inf = invalid
     exact: bool
-    xs: list[float] | None
-    ys: list[float] | None
+    xs: list[list[float]] | None   # per stroke
+    ys: list[list[float]] | None   # per stroke
     size: int
     vkey: bytes | None = None  # value-dedup key, precomputed at scoring
 
 
 def _values_key(sc: CurveScore) -> tuple | bytes:
-    """Dedup key from the sampled curve: comparisons stay by values, the
-    same rule as the sequence engine (different trees, same curve = same
+    """Dedup key from the sampled curves: comparisons stay by values, the
+    same rule as the sequence engine (different trees, same curves = same
     answer). The key is built once per candidate by the scorer (a Python
     round-per-value pass costs ~30% of a generation otherwise)."""
     return sc.vkey if sc.vkey is not None else ()
@@ -131,16 +179,16 @@ def _values_key(sc: CurveScore) -> tuple | bytes:
 
 @dataclass(slots=True)
 class CurveBest:
-    x_tree: Node
-    y_tree: Node
+    x_trees: tuple[Node, ...]   # one tree per stroke
+    y_trees: tuple[Node, ...]
     score: CurveScore
 
     def entry(self, with_curve: bool) -> dict:
         out = {
-            "x_text": to_text(self.x_tree),
-            "x_ast": to_dict(self.x_tree),
-            "y_text": to_text(self.y_tree),
-            "y_ast": to_dict(self.y_tree),
+            "x_text": [to_text(t) for t in self.x_trees],
+            "x_ast": [to_dict(t) for t in self.x_trees],
+            "y_text": [to_text(t) for t in self.y_trees],
+            "y_ast": [to_dict(t) for t in self.y_trees],
             "size": self.score.size,
             "fitness": round(self.score.fitness, 6),
             "error": None if self.score.error == math.inf
@@ -148,10 +196,10 @@ class CurveBest:
             "solved": self.score.exact,
         }
         if with_curve:
-            out["curve"] = {
-                "xs": [round(v, 6) for v in self.score.xs],
-                "ys": [round(v, 6) for v in self.score.ys],
-            }
+            out["curves"] = [
+                {"xs": [round(v, 6) for v in xs], "ys": [round(v, 6) for v in ys]}
+                for xs, ys in zip(self.score.xs, self.score.ys, strict=True)
+            ]
         return out
 
 
@@ -188,12 +236,15 @@ class CurveResult:
 
 
 class CurveGP:
-    """GP over pairs of trees; the loop mirrors GPEngine step by step so
-    the server can drive both engines through the same paced loop."""
+    """GP over one pair of trees per stroke; the loop mirrors GPEngine
+    step by step so the server can drive both engines through the same
+    paced loop. Wiring is fixed: pair k always traces stroke k."""
 
-    def __init__(self, points: list[tuple[float, float]],
+    def __init__(self, strokes: list[list[tuple[float, float]]],
                  config: CurveConfig | None = None):
-        self.target = CurveTarget(points)
+        strokes = normalize_strokes(strokes)
+        self.targets = [CurveTarget(s) for s in strokes]
+        self.n_strokes = len(self.targets)
         self.cfg = config or CurveConfig()
         self.ops: tuple[str, ...] = (tuple(self.cfg.allowed_ops)
                                      if self.cfg.allowed_ops is not None
@@ -209,15 +260,27 @@ class CurveGP:
                                       if self.cfg.allowed_consts is not None
                                       else ("pi", "e")))
             if v is not None)
+        # Fractional constants are curve-intrinsic: they exist regardless
+        # of the pi/e chips because no typical shape is reachable without
+        # them. tau (2*pi) turns a full trig period into tau*n.
+        self.specials = tuple(sorted(set(self.specials)
+                                     | set(CURVE_CONSTS)
+                                     | {CURVE_TAU}))
         self.rng = random.Random(self.cfg.seed)
         self.generation = 0
-        # Ramped half-and-half over 2x trees, paired up: the same init
-        # spread as the sequence engine, two trees per candidate.
-        trees = initial_population(self.rng, self.cfg.population * 2,
-                                   self.cfg.max_depth, self.ops,
-                                   self.funcs, self.specials)
-        self.population: list[tuple[Node, Node]] = list(
-            zip(trees[::2], trees[1::2], strict=True))
+        # Ramped half-and-half per stroke over 2x trees, paired up: the
+        # same init spread as the sequence engine, two trees per pair.
+        stroke_pairs: list[list[tuple[Node, Node]]] = []
+        for _ in self.targets:
+            trees = initial_population(self.rng, self.cfg.population * 2,
+                                       self.cfg.max_depth, self.ops,
+                                       self.funcs, self.specials)
+            stroke_pairs.append(list(zip(trees[::2], trees[1::2], strict=True)))
+        # genome = one pair per stroke
+        self.population: list[tuple[tuple[Node, Node], ...]] = [
+            tuple(sp[k] for sp in stroke_pairs)
+            for k in range(self.cfg.population)
+        ]
         self.best_ever: CurveBest | None = None
         self.solved = False
         self.solved_gen: int | None = None
@@ -236,30 +299,44 @@ class CurveGP:
                 random_tree(self.rng, max_depth, "grow", self.ops,
                             self.funcs, self.specials))
 
-    def _sample(self, pair: tuple[Node, Node]) -> tuple[
-            list[float] | None, list[float] | None, int]:
-        """Compile both trees and sample them at the t-grid. Returns
-        (None, None, size) on any domain/overflow problem. Pure Python —
-        each tree is a tiny distinct closure, the per-tree loop is
-        unavoidable; the expensive distance math below is batched."""
-        x_tree, y_tree = pair
-        size = int(weighted_size(x_tree) + weighted_size(y_tree))
+    def _random_genome(self, max_depth: int) -> tuple[tuple[Node, Node], ...]:
+        return tuple(self._random_pair(max_depth) for _ in self.targets)
+
+    def _genome_size(self, genome: tuple[tuple[Node, Node], ...]) -> int:
+        return int(sum(weighted_size(x) + weighted_size(y)
+                       for x, y in genome))
+
+    def _sample(self, genome: tuple[tuple[Node, Node], ...]) -> tuple[
+            list[list[float]] | None, list[list[float]] | None, int]:
+        """Compile and sample every stroke's pair at the t-grid. Returns
+        (None, None, size) if ANY stroke's pair hits a domain/overflow
+        problem — a candidate must trace every stroke. Pure Python — each
+        tree is a tiny distinct closure; the distance math is batched."""
+        size = self._genome_size(genome)
+        xs_all: list[list[float]] = []
+        ys_all: list[list[float]] = []
         try:
-            fx = compile_node(x_tree)
-            fy = compile_node(y_tree)
-            xs = [fx(t) for t in self._ts]
-            ys = [fy(t) for t in self._ts]
-            for v in xs + ys:
-                # A fractional power of a negative base returns complex,
-                # not an exception — type-check before isfinite.
-                if isinstance(v, complex) or not math.isfinite(v) or abs(v) > BIG:
-                    return None, None, size
+            for x_tree, y_tree in genome:
+                fx = compile_node(x_tree)
+                fy = compile_node(y_tree)
+                xs = [fx(t) for t in self._ts]
+                ys = [fy(t) for t in self._ts]
+                for v in xs + ys:
+                    # A fractional power of a negative base returns
+                    # complex, not an exception — check before isfinite.
+                    if (isinstance(v, complex) or not math.isfinite(v)
+                            or abs(v) > BIG):
+                        return None, None, size
+                xs_all.append(xs)
+                ys_all.append(ys)
         except (ZeroDivisionError, OverflowError, ValueError, TypeError):
             return None, None, size
-        return xs, ys, size
+        return xs_all, ys_all, size
 
-    def _batch_errors(self, curves: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Two-sided nearest-point mean distances for a batch of curves.
+    def _batch_errors(self, curves: np.ndarray,
+                      target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Two-sided nearest-point mean distances for a batch of curves
+        against one stroke's target.
 
         curves: (M, CURVE_SAMPLES, 2). Squared distances expand via
         |c-t|^2 = |c|^2 + |t|^2 - 2 c·t so the inner loop is one GEMM
@@ -269,7 +346,6 @@ class CurveGP:
         sample axis = drawing -> curve coverage. One-sided fitness would
         reward a tiny curve hiding somewhere inside the shape.
         """
-        target = self.target.array
         t_sq = (target * target).sum(axis=1)
         m = curves.shape[0]
         d_ct = np.empty(m)
@@ -289,20 +365,26 @@ class CurveGP:
     def _vkey(curves: np.ndarray, index: int) -> bytes:
         return np.round(curves[index], 4).tobytes()
 
-    def _score(self, pair: tuple[Node, Node], parsimony: float) -> CurveScore:
-        """Score a single pair (tests and spot checks); step() uses the
+    def _score(self, genome: tuple[tuple[Node, Node], ...],
+               parsimony: float) -> CurveScore:
+        """Score a single genome (tests and spot checks); step() uses the
         batched path — same math, same values."""
-        xs, ys, size = self._sample(pair)
-        if xs is None:
+        xs_all, ys_all, size = self._sample(genome)
+        if xs_all is None:
             return CurveScore(INVALID_FITNESS, math.inf, False, None, None, size)
-        curves = np.empty((1, CURVE_SAMPLES, 2))
-        curves[0, :, 0] = xs
-        curves[0, :, 1] = ys
-        d_ct, d_tc = self._batch_errors(curves)
-        error = min(1.0, float(0.5 * (d_ct[0] + d_tc[0])))
+        error_sum = 0.0
+        vkey = b""
+        for k, target in enumerate(self.targets):
+            curves = np.empty((1, CURVE_SAMPLES, 2))
+            curves[0, :, 0] = xs_all[k]
+            curves[0, :, 1] = ys_all[k]
+            d_ct, d_tc = self._batch_errors(curves, target.array)
+            error_sum += min(1.0, float(0.5 * (d_ct[0] + d_tc[0])))
+            vkey += np.round(curves, 4).tobytes()
+        error = error_sum / self.n_strokes
         fitness = (1.0 - error) - parsimony * size
-        return CurveScore(fitness, error, error < SOLVE_ERROR, xs, ys, size,
-                          vkey=self._vkey(curves, 0))
+        return CurveScore(fitness, error, error < SOLVE_ERROR, xs_all, ys_all,
+                          size, vkey=vkey)
 
     # -- one generation ---------------------------------------------------
 
@@ -312,59 +394,73 @@ class CurveGP:
 
     def step(self) -> CurveResult:
         started = time.perf_counter()
-        # Phase 1: simplify, compile and sample — Python, per pair.
-        pairs: list[tuple[Node, Node]] = []
+        # Phase 1: simplify, compile and sample — Python, per genome.
+        genomes: list[tuple[tuple[Node, Node], ...]] = []
         scores: list[CurveScore] = []
         pending: list[int] = []   # indices of valid samples awaiting distances
-        for pair in self.population:
-            simp = (simplify(pair[0], self.ops), simplify(pair[1], self.ops))
-            pairs.append(simp)
-            xs, ys, size = self._sample(simp)
-            if xs is None:
+        for genome in self.population:
+            simp = tuple((simplify(x, self.ops), simplify(y, self.ops))
+                         for x, y in genome)
+            genomes.append(simp)
+            xs_all, ys_all, size = self._sample(simp)
+            if xs_all is None:
                 scores.append(CurveScore(INVALID_FITNESS, math.inf, False,
                                          None, None, size))
             else:
                 pending.append(len(scores))
-                scores.append(CurveScore(0.0, 0.0, False, xs, ys, size))
-        # Phase 2: all nearest-point distances in one numpy batch.
+                scores.append(CurveScore(0.0, 0.0, False, xs_all, ys_all, size))
+        # Phase 2: all nearest-point distances in numpy batches, per
+        # stroke; a candidate's error is the mean over its strokes.
         if pending:
-            curves = np.empty((len(pending), CURVE_SAMPLES, 2))
-            for k, i in enumerate(pending):
-                curves[k, :, 0] = scores[i].xs
-                curves[k, :, 1] = scores[i].ys
-            d_ct, d_tc = self._batch_errors(curves)
             parsimony = self.cfg.parsimony
-            for k, i in enumerate(pending):
+            errors = np.zeros(len(pending))
+            vkeys: list[bytes] = [b""] * len(pending)
+            for k, target in enumerate(self.targets):
+                curves = np.empty((len(pending), CURVE_SAMPLES, 2))
+                for row, i in enumerate(pending):
+                    curves[row, :, 0] = scores[i].xs[k]
+                    curves[row, :, 1] = scores[i].ys[k]
+                d_ct, d_tc = self._batch_errors(curves, target.array)
+                errors += np.minimum(1.0, 0.5 * (d_ct + d_tc))
+                # value-dedup key: the candidate's rounded curves across
+                # ALL strokes, built once per generation
+                rounded = np.round(curves, 4)
+                for row in range(len(pending)):
+                    vkeys[row] += rounded[row].tobytes()
+            errors /= self.n_strokes
+            for row, i in enumerate(pending):
                 sc = scores[i]
-                error = min(1.0, 0.5 * (float(d_ct[k]) + float(d_tc[k])))
+                error = float(errors[row])
                 scores[i] = CurveScore(
                     (1.0 - error) - parsimony * sc.size, error,
                     error < SOLVE_ERROR, sc.xs, sc.ys, sc.size,
-                    vkey=self._vkey(curves, k))
-        scored = list(zip(pairs, scores, strict=True))
-        self.population = pairs
+                    vkey=vkeys[row])
+        scored = list(zip(genomes, scores, strict=True))
+        self.population = genomes
 
         stats = self._stats(scored)
 
-        # Track the most accurate pair (lowest error), not the fitness
+        # Track the most accurate genome (lowest error), not the fitness
         # leader — the same no-regress rule as the sequence engine.
         true_best_error = math.inf
         true_best = scored[0]
-        for pair, sc in scored:
+        for genome, sc in scored:
             if sc.xs is not None and sc.error < true_best_error:
                 true_best_error = sc.error
-                true_best = (pair, sc)
+                true_best = (genome, sc)
         new_best = (self.best_ever is None
                     or true_best[1].error < self.best_ever.score.error - 1e-12)
         if new_best:
-            self.best_ever = CurveBest(true_best[0][0], true_best[0][1],
-                                       true_best[1])
+            self.best_ever = CurveBest(
+                tuple(x for x, _ in true_best[0]),
+                tuple(y for _, y in true_best[0]),
+                true_best[1])
 
         # Fitness sharing: break clone armies of identical curves the
         # same way the sequence engine breaks identical outputs.
         keys = [_values_key(sc) if sc.xs is not None else () for _, sc in scored]
         counts = Counter(keys)
-        for (pair, sc), key in zip(scored, keys, strict=True):
+        for (genome, sc), key in zip(scored, keys, strict=True):
             if key and counts[key] > 1:
                 sc.fitness -= (counts[key] - 1) * 0.001
 
@@ -396,8 +492,8 @@ class CurveGP:
             self.solved_gen = self.generation
 
         top = []
-        seen: set[tuple] = set()
-        for pair, sc in scored:
+        seen: set[tuple | bytes] = set()
+        for genome, sc in scored:
             if len(top) >= 5:
                 break
             if sc.xs is None:
@@ -407,8 +503,10 @@ class CurveGP:
                 continue
             seen.add(key)
             top.append({
-                "x_text": to_text(pair[0]), "x_ast": to_dict(pair[0]),
-                "y_text": to_text(pair[1]), "y_ast": to_dict(pair[1]),
+                "x_text": [to_text(x) for x, _ in genome],
+                "x_ast": [to_dict(x) for x, _ in genome],
+                "y_text": [to_text(y) for _, y in genome],
+                "y_ast": [to_dict(y) for _, y in genome],
                 "size": sc.size,
                 "fitness": round(sc.fitness, 6),
                 "error": None if sc.error == math.inf else round(sc.error, 8),
@@ -434,21 +532,22 @@ class CurveGP:
 
     # -- breeding ---------------------------------------------------------
 
-    def _breed(self, scored: list[tuple[tuple[Node, Node], CurveScore]]
-               ) -> list[tuple[Node, Node]]:
+    def _breed(self, scored: list[tuple[tuple[tuple[Node, Node], ...],
+                                        CurveScore]]
+               ) -> list[tuple[tuple[Node, Node], ...]]:
         cfg = self.cfg
-        elite = [pair for pair, _ in scored[:cfg.elitism]]
-        offspring: list[tuple[Node, Node]] = []
+        elite = [genome for genome, _ in scored[:cfg.elitism]]
+        offspring: list[tuple[tuple[Node, Node], ...]] = []
         # Random immigrants keep baseline diversity alive, as in gp.py.
         immigrants = int(cfg.population * cfg.random_immigrants)
         for _ in range(immigrants):
             if len(elite) + len(offspring) < cfg.population:
-                offspring.append(self._random_pair(3))
+                offspring.append(self._random_genome(3))
         while len(elite) + len(offspring) < cfg.population:
             if self._shock_now and self.rng.random() < cfg.shock_fraction:
                 # Shock trees stay shallow (depth 3): they incur almost
                 # no parsimony penalty and survive selection better.
-                offspring.append(self._random_pair(3))
+                offspring.append(self._random_genome(3))
                 continue
             a = self._tournament(scored)
             if self.rng.random() < cfg.p_crossover:
@@ -456,47 +555,83 @@ class CurveGP:
             else:
                 child = a
             if self.rng.random() < cfg.p_mutate:
-                child = self._pair_mutate(child)
+                child = self._genome_mutate(child)
             offspring.append(child)
         return elite + offspring
 
-    def _pair_crossover(self, a: tuple[Node, Node],
-                        b: tuple[Node, Node]) -> tuple[Node, Node]:
-        # Recombine ONE randomly chosen component: the other passes
-        # through untouched, so good halves spread like genes.
-        i = self.rng.randrange(2)
-        child = list(a)
-        child[i] = crossover(self.rng, a[i], b[i], self.cfg.max_depth,
-                             self.ops, self.funcs, self.specials)
-        return (child[0], child[1])
-
-    def _pair_mutate(self, pair: tuple[Node, Node]) -> tuple[Node, Node]:
-        i = self.rng.randrange(2)
-        tree = pair[i]
-        if self.rng.random() < 0.05:
-            tree = point_mutation(self.rng, tree, self.ops, self.funcs,
-                                  self.specials)
+    def _pair_crossover(self, a: tuple[tuple[Node, Node], ...],
+                        b: tuple[tuple[Node, Node], ...]
+                        ) -> tuple[tuple[Node, Node], ...]:
+        # Recombine ONE randomly chosen component of ONE randomly chosen
+        # stroke: everything else passes through untouched, so good
+        # halves spread like genes.
+        k = self.rng.randrange(self.n_strokes)
+        x, y = a[k]
+        bx, by = b[k]
+        if self.rng.randrange(2) == 0:
+            x = crossover(self.rng, x, bx, self.cfg.max_depth,
+                          self.ops, self.funcs, self.specials)
         else:
-            tree = subtree_mutation(self.rng, tree, self.cfg.max_depth,
-                                    self.ops, self.funcs, self.specials)
-        child = list(pair)
-        child[i] = tree
-        return (child[0], child[1])
+            y = crossover(self.rng, y, by, self.cfg.max_depth,
+                          self.ops, self.funcs, self.specials)
+        child = list(a)
+        child[k] = (x, y)
+        return tuple(child)
 
-    def _tournament(self, scored: list[tuple[tuple[Node, Node], CurveScore]]
-                    ) -> tuple[Node, Node]:
+    def _tweak_const(self, tree: Node) -> Node | None:
+        """Gaussian nudge of one random constant, or None when the picked
+        node is not a tunable constant. The discrete constant pool cannot
+        fine-tune a 0.667 into the 0.75 a stroke actually needs — this is
+        the classic ephemeral-constant mutation, curve edition."""
+        path = random_path(self.rng, tree)
+        node = subtree_at(tree, path)
+        if not isinstance(node, Const):
+            return None
+        if node.value in (math.pi, math.e, CURVE_TAU):
+            return None  # special constants are semantic, leave them be
+        v = max(-3.0, min(3.0, node.value + self.rng.gauss(0, 0.05)))
+        return replace_subtree(tree, path, Const(v))
+
+    def _genome_mutate(self, genome: tuple[tuple[Node, Node], ...]
+                       ) -> tuple[tuple[Node, Node], ...]:
+        k = self.rng.randrange(self.n_strokes)
+        x, y = genome[k]
+        i = self.rng.randrange(2)
+        tree = x if i == 0 else y
+        tweaked = False
+        # ~30% of mutations nudge a constant instead of restructuring
+        if self.rng.random() < 0.3:
+            tweaked_tree = self._tweak_const(tree)
+            if tweaked_tree is not None:
+                tree = tweaked_tree
+                tweaked = True
+        if not tweaked:
+            if self.rng.random() < 0.05:
+                tree = point_mutation(self.rng, tree, self.ops, self.funcs,
+                                      self.specials)
+            else:
+                tree = subtree_mutation(self.rng, tree, self.cfg.max_depth,
+                                        self.ops, self.funcs, self.specials)
+        child = list(genome)
+        child[k] = (tree, y) if i == 0 else (x, tree)
+        return tuple(child)
+
+    def _tournament(self, scored: list[tuple[tuple[tuple[Node, Node], ...],
+                                             CurveScore]]
+                    ) -> tuple[tuple[Node, Node], ...]:
         n = len(scored)
         winner, win_fit = scored[self.rng.randrange(n)]
         win_fit = win_fit.fitness
         for _ in range(self.cfg.tournament - 1):
-            pair, sc = scored[self.rng.randrange(n)]
+            genome, sc = scored[self.rng.randrange(n)]
             if sc.fitness > win_fit:
-                winner, win_fit = pair, sc.fitness
+                winner, win_fit = genome, sc.fitness
         return winner
 
     # -- statistics -------------------------------------------------------
 
-    def _stats(self, scored: list[tuple[tuple[Node, Node], CurveScore]]) -> dict:
+    def _stats(self, scored: list[tuple[tuple[tuple[Node, Node], ...],
+                                         CurveScore]]) -> dict:
         scores = [s for _, s in scored]
         sizes = [s.size for s in scores]
         hist = [0] * SIZE_HIST_BINS

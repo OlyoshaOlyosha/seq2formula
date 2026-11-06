@@ -27,7 +27,7 @@ def test_score_matches_bruteforce() -> None:
     rng = random.Random(7)
     pts = [(rng.random(), rng.random()) for _ in range(40)]
     eng = CurveGP(pts, CurveConfig(seed=1))
-    sc = eng._score((Var(), Var()), 0.0)
+    sc = eng._score(((Var(), Var()),), 0.0)
     curve = [(i / (CURVE_SAMPLES - 1), i / (CURVE_SAMPLES - 1))
              for i in range(CURVE_SAMPLES)]
     d_ct = sum(min(math.hypot(px - cx, py - cy) for px, py in pts)
@@ -35,13 +35,13 @@ def test_score_matches_bruteforce() -> None:
     d_tc = sum(min(math.hypot(px - cx, py - cy) for cx, cy in curve)
                for px, py in pts) / len(pts)
     assert sc.error == pytest.approx(min(1.0, 0.5 * (d_ct + d_tc)), abs=1e-9)
-    assert eng.target.nearest_mean([(0.4, 0.6)]) == pytest.approx(
+    assert eng.targets[0].nearest_mean([(0.4, 0.6)]) == pytest.approx(
         min(math.hypot(px - 0.4, py - 0.6) for px, py in pts))
 
 
 def test_invalid_pair_scores_invalid() -> None:
     engine = CurveGP(LINE, CurveConfig(seed=1))
-    bad = (DIV_ZERO, Var())
+    bad = ((DIV_ZERO, Var()),)
     score = engine._score(bad, 0.01)
     assert score.fitness == INVALID_FITNESS
     assert score.error == math.inf
@@ -90,7 +90,27 @@ def test_payload_shape() -> None:
     assert payload["mode"] == "curve"
     for key in ("gen", "best", "top", "stats", "solved", "population"):
         assert key in payload
-    assert len(payload["best"]["curve"]["xs"]) == 64
-    assert len(payload["best"]["curve"]["ys"]) == 64
+    assert len(payload["best"]["curves"]) == 1  # one stroke
+    assert len(payload["best"]["curves"][0]["xs"]) == CURVE_SAMPLES
+    assert len(payload["best"]["curves"][0]["ys"]) == CURVE_SAMPLES
     assert payload["best"]["error"] is not None
     assert payload["stats"]["diversity"] > 0
+
+
+def test_two_stroke_target_converges() -> None:
+    """Two parallel segments (densely sampled, like real freehand
+    strokes): each stroke gets its own pair; both must be traced for the
+    mean error to drop."""
+    strokes = [[(0.1 + 0.8 * i / 39, 0.25) for i in range(40)],
+               [(0.1 + 0.8 * i / 39, 0.75) for i in range(40)]]
+    eng = CurveGP(strokes, CurveConfig(seed=0, population=200,
+                                       max_generations=300))
+    start = eng.step().best.score.error
+    best = start
+    for _ in range(299):
+        best = eng.step().best.score.error
+        if eng.solved:
+            break
+    assert eng.solved
+    assert best < SOLVE_ERROR
+    assert best < start

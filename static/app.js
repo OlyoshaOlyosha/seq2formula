@@ -30,11 +30,11 @@ const state = {
   pendingPuzzleRestore: "", // remembered puzzle id, applied once the library loads
   isAutopilot: false,      // is the autopilot queue currently running
   mode: "sequence",        // sequence | curve — what the current run is
-  curvePoints: [],         // target cloud in the unit square (y down, canvas-style)
+  curveStrokes: [],        // target strokes: arrays of {x, y} in the unit square
   curveStroke: [],         // freehand stroke currently being drawn
   curveDrawing: false,
   curveBuf: null,          // per-run curve chart buffers
-  curveBestCurve: null,    // latest best {xs, ys} for the canvas overlay
+  curveBestCurves: null,   // latest best curves: [{xs, ys}] per stroke
   curveSolved: false,
   curveRafPending: false,
   lastCurveTexts: "",
@@ -876,9 +876,22 @@ function applyStatusMsg(msg) {
 /* Mirror of engine/curve.py SOLVE_ERROR: "solved" = mean two-sided
    distance below 2% of the unit square. */
 const SOLVE_ERROR_JS = 0.02;
-const CURVE_SAMPLES_JS = 64;      // mirror of engine CURVE_SAMPLES
-const CURVE_STROKE_POINTS = 64;   // stroke resample target (same number)
+const CURVE_SAMPLES_JS = 128;     // mirror of engine CURVE_SAMPLES
+const CURVE_STROKE_POINTS = 64;   // stroke resample target (engine upsamples)
 const MAX_CURVE_POINTS = 200;     // server-side cap, mirrored here
+const MAX_CURVE_STROKES = 6;      // mirror of engine MAX_STROKES
+
+/* Normalized accessors: gallery entries may hold the new `strokes` list
+   or the legacy single-stroke `points` flat cloud; ASTs became per-stroke
+   lists in the multi-stroke format. */
+function entryStrokes(entry) {
+  if (Array.isArray(entry.strokes) && entry.strokes.length) return entry.strokes;
+  return [entry.points || []];
+}
+
+function astList(ast) {
+  return Array.isArray(ast) ? ast : [ast];
+}
 
 /* Evenly spaced points along a polyline (proportional to segment
    length) — the building block for the one-stroke preset shapes. */
@@ -955,7 +968,7 @@ function resetCurveState() {
     gen: [], bestF: [], meanF: [], bestE: [], meanE: [], div: [],
     sizesX: [], sizesY: [],
   };
-  state.curveBestCurve = null;
+  state.curveBestCurves = null;
   state.curveSolved = false;
   state.lastCurveTexts = "";
   state.curveLog = [];
@@ -971,12 +984,18 @@ function resetCurveState() {
   renderCurveLog();
 }
 
+/* Total target points across all strokes (the server caps at 200). */
+function totalCurvePoints() {
+  return state.curveStrokes.reduce((sum, s) => sum + s.length, 0);
+}
+
 /* Enable/disable the curve controls and keep the pane visible exactly
    while a curve run exists (running, paused or finished). */
 function syncCurveUI() {
   const running = state.status === "running" || state.status === "paused";
-  $("curveStartBtn").disabled = running || state.curvePoints.length < 2;
+  $("curveStartBtn").disabled = running || !totalCurvePoints();
   $("curveStopBtn").disabled = !running;
+  $("curveUndoBtn").disabled = running || !state.curveStrokes.length;
   // the target is baked into the engine at start — no edits mid-run
   $("curveClearBtn").disabled = running;
   $("curveCanvas").classList.toggle("locked", running);
@@ -1039,9 +1058,14 @@ function initCurveCanvas() {
 
   canvas.addEventListener("pointerdown", (e) => {
     if (!editable()) return;
+    if (state.curveStrokes.length >= MAX_CURVE_STROKES) {
+      alertErr("максимум 6 штрихов");
+      return;
+    }
     canvas.setPointerCapture(e.pointerId);
     state.curveDrawing = true;
     state.curveStroke = [toUnit(e)];
+    state.curveStrokes.push([]);
     drawCurveCanvas();
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -1054,14 +1078,13 @@ function initCurveCanvas() {
     state.curveDrawing = false;
     const pts = resampleStroke(state.curveStroke);
     state.curveStroke = [];
-    for (const p of pts) {
-      if (state.curvePoints.length >= MAX_CURVE_POINTS) {
-        alertErr("максимум 200 точек цели");
-        break;
-      }
-      state.curvePoints.push(p);
+    if (totalCurvePoints() + pts.length > MAX_CURVE_POINTS) {
+      state.curveStrokes.pop();  // drop the stroke we opened
+      alertErr("максимум 200 точек цели");
+    } else {
+      state.curveStrokes[state.curveStrokes.length - 1] = pts;
+      state.curvePreset = null;  // hand-drawn now, not a preset
     }
-    state.curvePreset = null;  // hand-drawn now, not a preset
     syncCurveUI();
     drawCurveCanvas();
   };
@@ -1083,10 +1106,12 @@ function drawCurveCanvas() {
 
   // target points — the drawing the user made
   ctx.fillStyle = CHART_COLORS.faint;
-  for (const p of state.curvePoints) {
-    ctx.beginPath();
-    ctx.arc(p.x * W, p.y * H, 4, 0, Math.PI * 2);
-    ctx.fill();
+  for (const stroke of state.curveStrokes) {
+    for (const p of stroke) {
+      ctx.beginPath();
+      ctx.arc(p.x * W, p.y * H, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // in-progress stroke as feedback
@@ -1101,16 +1126,19 @@ function drawCurveCanvas() {
     ctx.setLineDash([]);
   }
 
-  // the best curve found so far (parametric polyline over 64 samples)
-  const c = state.curveBestCurve;
-  if (c && c.xs && c.xs.length) {
+  // best curve per stroke (parametric polylines over 64 samples)
+  const curves = state.curveBestCurves;
+  if (curves && curves.length) {
     ctx.strokeStyle = state.curveSolved ? CHART_COLORS.positive : CHART_COLORS.accent;
     ctx.lineWidth = 3;
     ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(c.xs[0] * W, c.ys[0] * H);
-    for (let i = 1; i < c.xs.length; i++) ctx.lineTo(c.xs[i] * W, c.ys[i] * H);
-    ctx.stroke();
+    for (const c of curves) {
+      if (!c || !c.xs || !c.xs.length) continue;
+      ctx.beginPath();
+      ctx.moveTo(c.xs[0] * W, c.ys[0] * H);
+      for (let i = 1; i < c.xs.length; i++) ctx.lineTo(c.xs[i] * W, c.ys[i] * H);
+      ctx.stroke();
+    }
   }
 }
 
@@ -1146,12 +1174,11 @@ function applyCurveGen(msg) {
   const elapsed = state.runStartedAt ? fmtTime((now - state.runStartedAt) / 1000) : "—";
   $("curveSpeedTime").textContent = `${gps} · ${elapsed}`;
 
-  // hero pair: re-render only when the text changes
-  const texts = msg.best.x_text + "\n" + msg.best.y_text;
+  // hero pairs: re-render only when the text changes
+  const texts = msg.best.x_text.join("\n") + "\n" + msg.best.y_text.join("\n");
   if (texts !== state.lastCurveTexts) {
     state.lastCurveTexts = texts;
-    renderKatex($("curveFormulaX"), `x(t) = ${astToLatexT(msg.best.x_ast)}`, true);
-    renderKatex($("curveFormulaY"), `y(t) = ${astToLatexT(msg.best.y_ast)}`, true);
+    renderCurveHero(msg.best);
   }
   const sub = [`fitness ${fmtNum(msg.best.fitness)}`];
   if (msg.best.solved) sub.push('<span class="ok">порог взят</span>');
@@ -1166,11 +1193,35 @@ function applyCurveGen(msg) {
   renderCurveCheck(msg.best);
 
   state.curveSolved = msg.solved;
-  state.curveBestCurve = msg.best.curve;
+  state.curveBestCurves = msg.best.curves;
   scheduleCurveUpdate();
 }
 
-/* Curve-mode top list: each entry is a PAIR of formulas. */
+/* Hero: one x/y formula block per stroke; the stroke index only shows
+   when the drawing actually has several strokes. */
+function renderCurveHero(best) {
+  const box = $("curveFormulas");
+  box.innerHTML = "";
+  const multi = best.x_text.length > 1;
+  best.x_text.forEach((xt, k) => {
+    if (multi) {
+      const label = document.createElement("span");
+      label.className = "curve-stroke-label";
+      label.textContent = `Штрих ${k + 1}:`;
+      box.appendChild(label);
+    }
+    const fx = document.createElement("div");
+    fx.className = "hero-formula";
+    renderKatex(fx, `x(t) = ${astToLatexT(astList(best.x_ast)[k])}`, true);
+    box.appendChild(fx);
+    const fy = document.createElement("div");
+    fy.className = "hero-formula";
+    renderKatex(fy, `y(t) = ${astToLatexT(astList(best.y_ast)[k])}`, true);
+    box.appendChild(fy);
+  });
+}
+
+/* Curve-mode top list: each entry is one pair of formulas PER stroke. */
 function renderCurveTop(top) {
   const list = $("curveRaceList");
   list.innerHTML = "";
@@ -1181,14 +1232,18 @@ function renderCurveTop(top) {
     place.className = "race-place num";
     place.textContent = String(i + 1);
     li.appendChild(place);
-    const f = document.createElement("span");
-    f.className = "race-formula curve-race-formula";
-    renderKatex(f, `x(t)=${astToLatexT(item.x_ast)}`, false);
-    const f2 = document.createElement("span");
-    f2.className = "race-formula curve-race-formula";
-    renderKatex(f2, `y(t)=${astToLatexT(item.y_ast)}`, false);
-    li.appendChild(f);
-    li.appendChild(f2);
+    const xs = astList(item.x_ast);
+    const ys = astList(item.y_ast);
+    xs.forEach((xa, k) => {
+      const f = document.createElement("span");
+      f.className = "race-formula curve-race-formula";
+      renderKatex(f, `x(t)=${astToLatexT(xa)}`, false);
+      li.appendChild(f);
+      const f2 = document.createElement("span");
+      f2.className = "race-formula curve-race-formula";
+      renderKatex(f2, `y(t)=${astToLatexT(ys[k])}`, false);
+      li.appendChild(f2);
+    });
     const meta = document.createElement("span");
     meta.className = "race-meta num";
     meta.textContent = `ошибка ${fmtPercent(item.error)} · разм ${item.size}`;
@@ -1257,17 +1312,21 @@ function updateCurveRaceLog(msg) {
   } else if (msg.new_best) {
     // throttle like Поиск: a 100 gen/s run must not blur the feed
     if (!state.lastCurveLogGen || msg.gen - state.lastCurveLogGen >= 10) {
+      const multi = msg.best.x_text.length > 1;
       pushCurveLogEntry({
-        pre: "новая лучшая пара:",
-        latex: `x(t)=${astToLatexT(msg.best.x_ast)},\\ y(t)=${astToLatexT(msg.best.y_ast)}`,
-        text: `ошибка ${fmtPercent(msg.best.error)}`,
+        pre: multi ? "новые лучшие пары:" : "новая лучшая пара:",
+        latex: `x(t)=${astToLatexT(astList(msg.best.x_ast)[0])},\\ y(t)=${astToLatexT(astList(msg.best.y_ast)[0])}`,
+        text: `ошибка ${fmtPercent(msg.best.error)}`
+          + (multi ? ` · штрихов ${msg.best.x_text.length}` : ""),
       });
       state.lastCurveLogGen = msg.gen;
     }
   }
 }
 
-/* Per-t check table, the curve analog of «Проверка формулы по числам». */
+/* Per-t check table, the curve analog of «Проверка формулы по числам».
+   Single stroke: shows x(t), y(t) and the miss; several strokes: the
+   miss averaged over the strokes (the formulas sit in the hero). */
 const CURVE_CHECK_TS = [0, 0.2, 0.4, 0.6, 0.8, 1];
 
 function renderCurveCheck(best) {
@@ -1277,28 +1336,40 @@ function renderCurveCheck(best) {
   for (const t of CURVE_CHECK_TS) addCell(head, "th", fmtNum(t));
 
   const idx = (t) => Math.round(t * (CURVE_SAMPLES_JS - 1));
-  const curve = best.curve;
+  const curves = best.curves || [];
+  const single = curves.length === 1;
+  const curve = single ? curves[0] : null;
   const errCells = [];
-  const xs = CURVE_CHECK_TS.map((t) =>
-    curve && curve.xs ? fmtNum(curve.xs[idx(t)]) : "—");
-  const ys = CURVE_CHECK_TS.map((t) =>
-    curve && curve.ys ? fmtNum(curve.ys[idx(t)]) : "—");
-  buildTermsRow($("curveTermsX"), "x(t)", xs);
-  buildTermsRow($("curveTermsY"), "y(t)", ys);
-  const errs = CURVE_CHECK_TS.map((t) => {
-    if (!curve || !curve.xs) return "—";
-    const cx = curve.xs[idx(t)], cy = curve.ys[idx(t)];
-    let d = Infinity;
-    for (const p of state.curvePoints) {
-      d = Math.min(d, Math.hypot(p.x - cx, p.y - cy));
+  const missAt = (t) => {
+    if (!curves.length) return null;
+    let sum = 0;
+    for (let k = 0; k < curves.length; k++) {
+      const stroke = state.curveStrokes[k] || [];
+      const cx = curves[k].xs[idx(t)], cy = curves[k].ys[idx(t)];
+      let d = Infinity;
+      for (const p of stroke) d = Math.min(d, Math.hypot(p.x - cx, p.y - cy));
+      sum += Math.min(1, d);
     }
-    return fmtPercent(Math.min(1, d));
+    return sum / curves.length;
+  };
+
+  if (single) {
+    buildTermsRow($("curveTermsX"), "x(t)",
+      CURVE_CHECK_TS.map((t) => curve.xs ? fmtNum(curve.xs[idx(t)]) : "—"));
+    buildTermsRow($("curveTermsY"), "y(t)",
+      curve.ys ? CURVE_CHECK_TS.map((t) => fmtNum(curve.ys[idx(t)]))
+               : CURVE_CHECK_TS.map(() => "—"));
+  } else {
+    $("curveTermsX").innerHTML = "";
+    $("curveTermsY").innerHTML = "";
+  }
+  const errs = CURVE_CHECK_TS.map((t) => {
+    const d = missAt(t);
+    return d === null ? "—" : fmtPercent(d);
   });
   buildTermsRow($("curveTermsErr"), "промах", errs, errCells);
   errs.forEach((e, i) => {
-    if (curve && curve.xs && parseFloat(e.replace("%", "")) < 2) {
-      errCells[i].classList.add("ok");
-    }
+    if (parseFloat(e.replace("%", "")) < 2) errCells[i].classList.add("ok");
   });
 }
 
@@ -1349,8 +1420,8 @@ async function startCurveRun(event) {
   if (event) event.preventDefault();
   stopTitleFlash();
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
-  if (state.curvePoints.length < 2) {
-    alertErr("нарисуйте хотя бы две точки");
+  if (!totalCurvePoints()) {
+    alertErr("нарисуйте фигуру");
     return;
   }
   if (state.ops.size === 0) {
@@ -1367,13 +1438,13 @@ async function startCurveRun(event) {
     }
   }
   // round to 4 decimals: keeps the payload small, invisible on the canvas
-  const points = state.curvePoints.map((p) => [
+  const strokes = state.curveStrokes.map((stroke) => stroke.map((p) => [
     Math.round(p.x * 10000) / 10000,
     Math.round(p.y * 10000) / 10000,
-  ]);
+  ]));
   const body = {
     mode: "curve",
-    points,
+    strokes,
     preset: state.curvePreset,
     speed: Number($("speedRange").value),
     ops: [...state.ops],
@@ -1419,9 +1490,11 @@ async function loadCurves() {
     tr.className = "clickable-row";
     tr.title = "Вернуть этот рисунок на холст";
     tr.addEventListener("click", () => {
-      if (!Array.isArray(c.points)) return;
-      state.curvePoints = c.points.map(([x, y]) => ({ x, y }));
-      state.curveBestCurve = null;
+      const strokes = entryStrokes(c);
+      if (!strokes.length || !strokes[0].length) return;
+      state.curveStrokes = strokes.map((stroke) =>
+        stroke.map(([x, y]) => ({ x, y })));
+      state.curveBestCurves = null;
       state.curveSolved = false;
       state.curvePreset = c.preset || null;
       drawCurveCanvas();
@@ -1431,13 +1504,14 @@ async function loadCurves() {
     addCell(tr, "td", fmtWhen(c.ts));
 
     const f = document.createElement("td");
-    const wrapX = document.createElement("span");
-    wrapX.className = "curve-pair";
-    renderKatex(wrapX, `x(t) = ${astToLatexT(c.x_ast)}`, false);
-    const wrapY = document.createElement("span");
-    wrapY.className = "curve-pair";
-    renderKatex(wrapY, `y(t) = ${astToLatexT(c.y_ast)}`, false);
-    f.append(wrapX, wrapY);
+    const xs = astList(c.x_ast);
+    const ys = astList(c.y_ast);
+    xs.forEach((xa, k) => {
+      const wrap = document.createElement("span");
+      wrap.className = "curve-pair";
+      renderKatex(wrap, `x(t) = ${astToLatexT(xa)},\\ y(t) = ${astToLatexT(ys[k])}`, false);
+      f.appendChild(wrap);
+    });
     tr.appendChild(f);
 
     const err = document.createElement("td");
@@ -2041,9 +2115,10 @@ async function loadShapes() {
     tr.className = "clickable-row";
     tr.title = "Открыть эту фигуру на вкладке «Кривые»";
     tr.addEventListener("click", () => {
-      state.curvePoints = (c ? c.points : preset.pts).map((p) =>
-        Array.isArray(p) ? { x: p[0], y: p[1] } : { ...p });
-      state.curveBestCurve = null;
+      const src = c ? entryStrokes(c) : [preset.pts];
+      state.curveStrokes = src.map((stroke) =>
+        stroke.map((p) => Array.isArray(p) ? { x: p[0], y: p[1] } : { ...p }));
+      state.curveBestCurves = null;
       state.curveSolved = false;
       state.curvePreset = preset.name;
       drawCurveCanvas();
@@ -2057,7 +2132,11 @@ async function loadShapes() {
 
     const result = document.createElement("td");
     if (c) {
-      renderKatex(result, `x(t)=${astToLatexT(c.x_ast)},\\ y(t)=${astToLatexT(c.y_ast)}`, false);
+      const xs = astList(c.x_ast);
+      const ys = astList(c.y_ast);
+      renderKatex(result,
+        `x(t)=${astToLatexT(xs[0])},\\ y(t)=${astToLatexT(ys[0])}`
+        + (xs.length > 1 ? `\\ \\ldots (${xs.length})` : ""), false);
       result.className = c.solved ? "solved-text" : "amber-text";
     } else {
       result.textContent = "—";
@@ -2605,9 +2684,16 @@ function bindControls() {
   $("curveStartBtn").addEventListener("click", startCurveRun);
   $("curveStopBtn").addEventListener("click", () => control("stop"));
   $("curveClearBtn").addEventListener("click", () => {
-    state.curvePoints = [];
+    state.curveStrokes = [];
     state.curveStroke = [];
-    state.curveBestCurve = null;
+    state.curveBestCurves = null;
+    state.curvePreset = null;
+    drawCurveCanvas();
+    syncCurveUI();
+  });
+  $("curveUndoBtn").addEventListener("click", () => {
+    if (state.status === "running" || state.status === "paused") return;
+    state.curveStrokes.pop();
     state.curvePreset = null;
     drawCurveCanvas();
     syncCurveUI();
@@ -2625,8 +2711,8 @@ function bindControls() {
     btn.textContent = preset.name;
     btn.addEventListener("click", () => {
       if (state.status === "running" || state.status === "paused") return;
-      state.curvePoints = preset.pts.map((p) => ({ ...p }));
-      state.curveBestCurve = null;
+      state.curveStrokes = [preset.pts.map((p) => ({ ...p }))];
+      state.curveBestCurves = null;
       state.curvePreset = preset.name;
       drawCurveCanvas();
       syncCurveUI();

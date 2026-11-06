@@ -37,6 +37,7 @@ from engine import (
     to_dict,
     to_text,
 )
+from engine.curve import MAX_STROKES
 from engine.grammar import BINARY_OPS
 
 # Grammar feature tokens the dashboard may send in RunRequest.ops: binary
@@ -145,7 +146,9 @@ def hall_of_fame() -> list[dict]:
 class RunRequest(BaseModel):
     mode: str = Field(default="sequence", pattern="^(sequence|curve)$")
     terms: list[float] | None = None
-    points: list[list[float]] | None = None  # curve mode: target cloud
+    points: list[list[float]] | None = None  # curve mode: one-stroke cloud
+    # curve mode, multi-stroke drawing: each stroke gets its own x/y pair
+    strokes: list[list[list[float]]] | None = None
     preset: str | None = Field(default=None, max_length=40)  # shape preset name
     puzzle_id: str | None = None
     population: int | None = Field(default=None, ge=20, le=2000)
@@ -209,6 +212,7 @@ class RunManager:
         self.mode: str = "sequence"  # sequence | curve
         self.terms: list[float] = []
         self.points: list[list[float]] | None = None
+        self.strokes: list[list[tuple[float, float]]] | None = None
         self.curve_preset: str | None = None
         self.last_gen: dict | None = None
         self.finish_reason: str | None = None
@@ -267,17 +271,22 @@ class RunManager:
         puzzle: dict | None = None
         if request.mode == "curve":
             # Curve-tuned values differ from the sequence engine on purpose:
-            # a pair of trees needs shallower depth, and at the sequence
-            # parsimony (0.003) a pair drifts into wiggly monsters fast
-            # (see engine/curve.py).
+            # shallower depth, and a much weaker parsimony — a correct pair
+            # (circle) is 15+ nodes, and the sequence-level penalty makes
+            # the 1-node diagonal unbeatable (see engine/curve.py).
             config = CurveConfig(
                 **common,
                 parsimony=(request.parsimony if request.parsimony is not None
-                           else 0.01),
+                           else 0.001),
                 max_depth=5,
             )
-            self.engine = CurveGP(self._validate_points(request.points), config)
-            self.points = request.points
+            if request.strokes:
+                strokes = self._validate_strokes(request.strokes)
+            else:
+                strokes = [self._validate_points(request.points)]
+            self.engine = CurveGP(strokes, config)
+            self.strokes = strokes
+            self.points = [list(p) for stroke in strokes for p in stroke]
             self.terms = []
             self.curve_preset = request.preset
         else:
@@ -293,6 +302,7 @@ class RunManager:
             self.engine = GPEngine(terms, config)
             self.terms = terms
             self.points = None
+            self.strokes = None
         self.mode = request.mode
         self.status = "running"
         self.delay = 1.0 / request.speed
@@ -379,6 +389,39 @@ class RunManager:
                     422, "points must be finite and lie in the unit square")
             pts.append((float(x), float(y)))
         return pts
+
+    @staticmethod
+    def _validate_strokes(
+            strokes: list[list[list[float]]] | None,
+    ) -> list[list[tuple[float, float]]]:
+        """Multi-stroke curve target: 1..6 strokes, up to 200 points in
+        total, every point in the unit square. A single-point stroke is
+        kept — the engine pads it to two identical points."""
+        if not strokes:
+            raise HTTPException(422, "curve mode requires strokes")
+        if not (1 <= len(strokes) <= MAX_STROKES):
+            raise HTTPException(422,
+                                f"a drawing supports 1..{MAX_STROKES} strokes")
+        out: list[list[tuple[float, float]]] = []
+        total = 0
+        for stroke in strokes:
+            if not stroke or len(stroke) > MAX_POINTS:
+                raise HTTPException(422, "each stroke needs 1..200 points")
+            pts: list[tuple[float, float]] = []
+            for p in stroke:
+                if len(p) != 2:
+                    raise HTTPException(422, "each point must be [x, y]")
+                x, y = p
+                if not (math.isfinite(x) and math.isfinite(y)
+                        and 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                    raise HTTPException(
+                        422, "points must be finite and lie in the unit square")
+                pts.append((float(x), float(y)))
+            total += len(pts)
+            out.append(pts)
+        if total > MAX_POINTS:
+            raise HTTPException(422, f"total target points are capped at {MAX_POINTS}")
+        return out
 
     def control(self, action: str) -> dict:
         if self.engine is None or self.status == "idle":
@@ -498,6 +541,8 @@ class RunManager:
             "seed": self.engine.cfg.seed if self.engine else None,
             "sequence": self.terms,
             "points": self.points,
+            "strokes": ([[list(p) for p in stroke] for stroke in self.strokes]
+                        if self.strokes else None),
             "puzzle": ({k: self.puzzle[k] for k in ("id", "tier", "name")}
                        if self.puzzle else None),
             "generation": self.engine.generation if self.engine else 0,
@@ -571,6 +616,8 @@ class RunManager:
             entry.update({
                 "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "points": self.points,
+                "strokes": ([[list(p) for p in stroke] for stroke in self.strokes]
+                            if self.strokes else None),
                 "preset": self.curve_preset,
                 "formula": None,
                 "formula_ast": None,

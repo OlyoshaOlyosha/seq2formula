@@ -236,8 +236,9 @@
           <span class="head-right"><span class="chip" id="curveChip">нет прогона</span></span>
         </div>
         <p class="field-hint">Зажмите мышь и ведите — штрих превратится в точки цели.
-          Одиночный клик ставит одну точку. Серые точки — ваша цель,
-          индиго-линия — лучшая кривая x(t), y(t), найденная эволюцией.</p>
+          Каждый новый зажим начинает отдельный штрих (до 6), у каждого
+          штриха — своя пара формул x(t), y(t). Одиночный клик ставит
+          точку. Серые точки — ваша цель, индиго-линии — лучшие кривые.</p>
         <div class="preset-row" id="presetRow" role="group" aria-label="Готовые фигуры">
           <span class="ops-label">Заготовки</span>
           <!-- preset buttons are built by JS from CURVE_PRESETS -->
@@ -256,6 +257,7 @@
               <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
               Стоп
             </button>
+            <button class="btn" id="curveUndoBtn" disabled title="Убрать последний штрих">Отменить штрих</button>
             <button class="btn" id="curveClearBtn">Очистить</button>
           </div>
           <label class="seed field-inline">
@@ -312,8 +314,7 @@
           <div class="formula-hero curve-hero">
             <div class="hero-main">
               <div class="hero-label"><span class="hero-dot"></span><span>Лучшие формулы</span></div>
-              <div class="hero-formula" id="curveFormulaX" aria-live="polite"></div>
-              <div class="hero-formula" id="curveFormulaY" aria-live="polite"></div>
+              <div id="curveFormulas" aria-live="polite"></div>
               <div class="hero-sub num" id="curveSub"></div>
             </div>
           </div>

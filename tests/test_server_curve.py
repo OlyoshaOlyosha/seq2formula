@@ -60,6 +60,53 @@ def test_curve_run_runs_and_lands_in_gallery(
     assert entry["solved"] is False
 
 
+def test_multi_stroke_run_lands_in_gallery(tmp_path, monkeypatch) -> None:
+    strokes = [[[0.0, 0.25], [1.0, 0.25]], [[0.0, 0.75], [1.0, 0.75]]]
+    monkeypatch.setattr(server, "CURVES_FILE", tmp_path / "curves.json")
+    monkeypatch.setattr(
+        server, "SETTINGS_FILE",
+        _settings_file(tmp_path, {"population": 100, "max_generations": 5}))
+    manager = RunManager()
+
+    async def scenario() -> None:
+        snap = manager.start(RunRequest(mode="curve", strokes=strokes,
+                                        speed=240, preset="Улыбка"))
+        assert snap["mode"] == "curve"
+        assert len(snap["strokes"]) == 2
+        from engine import CurveGP
+        assert isinstance(manager.engine, CurveGP)
+        assert manager.engine.n_strokes == 2
+        await asyncio.sleep(1.5)
+        manager.stop(reason="test", notify=False)
+        await asyncio.sleep(0.1)
+
+    asyncio.run(scenario())
+    curves = json.loads((tmp_path / "curves.json").read_text(encoding="utf-8"))
+    entry = curves[0]
+    assert entry["strokes"] == strokes
+    assert entry["points"] == [[0.0, 0.25], [1.0, 0.25], [0.0, 0.75], [1.0, 0.75]]
+    assert entry["preset"] == "Улыбка"
+    assert len(entry["x_ast"]) == 2  # one pair per stroke
+
+
+def test_stroke_validation() -> None:
+    good = [[[0.0, 0.0], [1.0, 1.0]]]
+    assert len(RunManager._validate_strokes(good)) == 1
+    # a single-point stroke is valid (the engine pads it)
+    assert len(RunManager._validate_strokes([[[0.5, 0.5]]])) == 1
+    with pytest.raises(HTTPException):
+        RunManager._validate_strokes(None)
+    with pytest.raises(HTTPException):
+        RunManager._validate_strokes([[[0.5, 0.5]]] * 7)  # stroke cap
+    with pytest.raises(HTTPException):
+        RunManager._validate_strokes([[[1.5, 0.1], [0.2, 0.2]]])  # unit square
+    with pytest.raises(HTTPException):
+        RunManager._validate_strokes([[[0.0], [1.0, 1.0]]])  # not [x, y] pairs
+    with pytest.raises(HTTPException):
+        RunManager._validate_strokes(
+            [[[float(i) / 100, 0.5]] for i in range(201)])  # point cap
+
+
 def test_sequence_mode_rejected_points_and_vice_versa(tmp_path) -> None:
     manager = RunManager()
 
