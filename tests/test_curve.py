@@ -3,9 +3,17 @@
 import math
 import random
 
+import numpy as np
 import pytest
 
-from engine.curve import CURVE_SAMPLES, SOLVE_ERROR, CurveConfig, CurveGP, CurveTarget
+from engine.curve import (
+    CURVE_SAMPLES,
+    SOLVE_ERROR,
+    CurveConfig,
+    CurveGP,
+    CurveTarget,
+)
+from engine.evaluator import compile_node
 from engine.fitness import INVALID_FITNESS
 from engine.nodes import BinOp, Const, Var
 
@@ -114,3 +122,41 @@ def test_two_stroke_target_converges() -> None:
     assert eng.solved
     assert best < SOLVE_ERROR
     assert best < start
+
+
+def test_roughness_metric() -> None:
+    """Smooth analytic curve ~0 roughness, hard sawtooth (mod jumps)
+    near the cap; the metric itself is shape-agnostic."""
+    line = np.empty((1, CURVE_SAMPLES, 2))
+    line[0, :, 0] = line[0, :, 1] = [i / (CURVE_SAMPLES - 1)
+                                     for i in range(CURVE_SAMPLES)]
+    saw = np.empty((1, CURVE_SAMPLES, 2))
+    saw[0, :, 0] = [(20 * i / (CURVE_SAMPLES - 1)) % 1.0
+                    for i in range(CURVE_SAMPLES)]
+    saw[0, :, 1] = [i / (CURVE_SAMPLES - 1) for i in range(CURVE_SAMPLES)]
+    r = CurveGP._roughness_batch(np.vstack([line, saw]))
+    assert r[0] < 0.05
+    assert r[1] > 0.5
+
+
+def test_smoothness_hits_fitness_not_error() -> None:
+    """A jagged genome must lose fitness beyond its raw error, but the
+    reported error (and thus the solve criterion) stays untouched."""
+    jag = ((BinOp("/", BinOp("mod", BinOp("*", Var(), Const(20.0)),
+                                  Const(1.0)), Const(1.0)), Var()),)
+    eng = CurveGP(LINE, CurveConfig(seed=1))
+    sc = eng._score(jag, 0.0)
+    assert sc.error != math.inf
+    assert sc.fitness < (1.0 - sc.error)
+    assert not sc.exact
+
+
+def test_trig_seeds_are_valid_trees() -> None:
+    """Generic oscillation seeds must be evaluable trees (no domain or
+    type blow-ups) — they enter gen 0 and shocks."""
+    eng = CurveGP(LINE, CurveConfig(seed=5, population=20))
+    for _ in range(20):
+        f = compile_node(eng._trig_seed())
+        v = f(0.5)
+        assert not isinstance(v, complex)
+        assert math.isfinite(v)

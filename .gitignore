@@ -30,3 +30,6 @@ PRODUCT.md
 DESIGN.md
 .impeccable/
 .taste-skill/
+
+# Local benchmark outputs
+sweep_*.txt

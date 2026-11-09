@@ -36,7 +36,6 @@ from .fitness import INVALID_FITNESS
 from .grammar import (
     BINARY_OPS,
     crossover,
-    initial_population,
     point_mutation,
     random_path,
     random_tree,
@@ -46,8 +45,11 @@ from .grammar import (
 )
 from .nodes import (
     UNARY_FUNCS,
+    BinOp,
     Const,
     Node,
+    UnOp,
+    Var,
     simplify,
     special_value,
     to_dict,
@@ -78,12 +80,44 @@ MAX_STROKES = 6
 # division chains. They are injected into the specials pool, i.e. drawn
 # like pi/e (SPECIAL_CONST_P per constant node) and cost weight 1
 # (const_weight treats values < 1 as primitives).
-CURVE_CONSTS = (0.1, 0.2, 0.25, 0.4, 0.6, 0.75, 0.8, 0.9, 1 / 3, 2 / 3)
+CURVE_CONSTS = (0.1, 0.2, 0.25, 0.4, 0.5, 0.6, 0.75, 0.8, 0.9, 1 / 3, 2 / 3)
 # tau = 2*pi: with t in [0, 1] the full trig period needs 2*pi*t INSIDE
 # sin/cos — a deep, rarely-assembled structure. tau*n is three nodes and
 # makes the whole sin/cos family (circle, wave, star of Lissajous)
 # directly reachable. Excluded from the gaussian tweak like pi/e.
 CURVE_TAU = 2.0 * math.pi
+# Generic oscillation seeds: with this probability a freshly generated
+# tree component is "bias [+ amp *] sin/cos(k * t [+ phase])" instead of a
+# plain random tree. This is a property of the GRAMMAR (curves are usually
+# wavy; t runs over a normalized range), not a hint about any particular
+# target — the same seeds help circle, wave, heart, star and a freehand
+# doodle alike. Frequencies include tau/k so a full period fits t in
+# [0, 1] exactly.
+TRIG_SEED_RATE = 0.15
+# tau twice: one full period over t in [0, 1] is the overwhelmingly
+# common wavelength (circle, wave, heart, Lissajous), so it deserves
+# extra draw weight; 2*tau covers two-period waves, tau/k are sub-periods.
+TRIG_FREQS = (1.0, 2.0, 3.0, CURVE_TAU, CURVE_TAU, CURVE_TAU * 2,
+              CURVE_TAU / 2, CURVE_TAU / 3)
+# Fitness penalty weight against jagged curves: roughness (mean |second
+# difference| / mean |step|, capped at 1) is subtracted from fitness,
+# NEVER from error — the solve criterion stays untouched. Smooth analytic
+# curves (circle at 128 samples) measure ~0.05, mod-jump monsters ~1, so
+# the gap is up to ~0.05 fitness — enough to out-compete degenerate
+# shortcuts without bending the error itself.
+SMOOTH_W = 0.05
+# Share of genomes born as a COHERENT oscillating block: one shared
+# frequency k, x = bx + ax*sin(k*t), y = by + ay*cos|sin(k*t), with
+# continuous ephemeral constants (classic GP practice — the discrete
+# pool cannot hold an amplitude like 0.35). This is the natural
+# parametric basis of the unit square (any Lissajous curve), not a hint
+# about any target. Why coherent: fitness averages over the pair's
+# components, so a great x next to a random y dies before crossover can
+# marry the halves — only a block scores well AS A WHOLE. It need not
+# be born exact: early on the monsters are still weak, a block just
+# has to reach the elite, and the memetic pass walks its constants the
+# rest of the way (amplitude precision is unreachable for crossover).
+TRIG_BLOCK_RATE = 0.06
 
 
 @dataclass(slots=True)
@@ -111,6 +145,14 @@ class CurveConfig:
     stagnation_max: int = 120
     stagnation_factor: float = 1.2
     random_immigrants: float = 0.02
+    # Memetic refinement: every generation the top-N valid unsolved
+    # genomes get T random constant-nudge attempts each, keeping the best.
+    # Crossover assembles the right SHAPE (a seeded sin/cos pair) but the
+    # discrete constant pool cannot land an amplitude like 0.35 — the
+    # last 2-4% of error live in the constants, and only local search
+    # walks them down.
+    memetic_elite: int = 3
+    memetic_tries: int = 24
 
 
 class CurveTarget:
@@ -270,11 +312,19 @@ class CurveGP:
         self.generation = 0
         # Ramped half-and-half per stroke over 2x trees, paired up: the
         # same init spread as the sequence engine, two trees per pair.
+        # Some trees are generic trig seeds instead (TRIG_SEED_RATE).
         stroke_pairs: list[list[tuple[Node, Node]]] = []
+        depths = list(range(2, self.cfg.max_depth + 1))
         for _ in self.targets:
-            trees = initial_population(self.rng, self.cfg.population * 2,
-                                       self.cfg.max_depth, self.ops,
-                                       self.funcs, self.specials)
+            trees: list[Node] = []
+            for i in range(self.cfg.population * 2):
+                if self.rng.random() < TRIG_SEED_RATE:
+                    trees.append(self._trig_seed())
+                else:
+                    trees.append(random_tree(
+                        self.rng, depths[i % len(depths)],
+                        "full" if i % 2 == 0 else "grow",
+                        self.ops, self.funcs, self.specials))
             stroke_pairs.append(list(zip(trees[::2], trees[1::2], strict=True)))
         # genome = one pair per stroke
         self.population: list[tuple[tuple[Node, Node], ...]] = [
@@ -293,11 +343,51 @@ class CurveGP:
 
     # -- genome helpers ---------------------------------------------------
 
+    def _trig_seed(self) -> Node:
+        """Generic oscillating tree: bias [+ amp *] sin/cos(k*t [+ phase]).
+        Gives crossover ready-made wave building blocks; frequency k is
+        drawn so that a full period lands inside t in [0, 1]."""
+        rng = self.rng
+        inner: Node = BinOp("*", Const(rng.choice(TRIG_FREQS)), Var())
+        if rng.random() < 0.3:
+            inner = BinOp("+", inner, Const(rng.choice(self.specials)))
+        tree: Node = UnOp(rng.choice(("sin", "cos")), inner)
+        # Amplitude and bias from the fractional pool only: pi/e/tau as
+        # an amplitude or offset is noise — useful seeds live in [0, 1].
+        if rng.random() < 0.6:
+            tree = BinOp("*", Const(rng.choice(CURVE_CONSTS)), tree)
+        if rng.random() < 0.6:
+            tree = BinOp("+", Const(rng.choice(CURVE_CONSTS)), tree)
+        return tree
+
+    def _random_tree(self, max_depth: int) -> Node:
+        if self.rng.random() < TRIG_SEED_RATE:
+            return self._trig_seed()
+        return random_tree(self.rng, max_depth, "grow", self.ops,
+                           self.funcs, self.specials)
+
+    def _trig_block(self) -> tuple[Node, Node]:
+        """Coherent oscillating pair with one shared frequency and
+        ephemeral (continuous) constants — see TRIG_BLOCK_RATE."""
+        rng = self.rng
+        k = rng.choice(TRIG_FREQS)
+        y_trig = "cos" if rng.randrange(2) == 0 else "sin"
+        trees: list[Node] = []
+        for trig, lo, hi in (("sin", 0.05, 0.55), (y_trig, 0.05, 0.55)):
+            amp = rng.uniform(lo, hi)
+            bias = rng.uniform(0.1, 0.9)
+            tree: Node = UnOp(trig, BinOp("*", Const(k), Var()))
+            if rng.random() < 0.7:
+                tree = BinOp("*", Const(amp), tree)
+            if rng.random() < 0.8:
+                tree = BinOp("+", Const(bias), tree)
+            trees.append(tree)
+        return trees[0], trees[1]
+
     def _random_pair(self, max_depth: int) -> tuple[Node, Node]:
-        return (random_tree(self.rng, max_depth, "grow", self.ops,
-                            self.funcs, self.specials),
-                random_tree(self.rng, max_depth, "grow", self.ops,
-                            self.funcs, self.specials))
+        if self.rng.random() < TRIG_BLOCK_RATE:
+            return self._trig_block()
+        return (self._random_tree(max_depth), self._random_tree(max_depth))
 
     def _random_genome(self, max_depth: int) -> tuple[tuple[Node, Node], ...]:
         return tuple(self._random_pair(max_depth) for _ in self.targets)
@@ -362,6 +452,19 @@ class CurveGP:
         return d_ct, d_tc
 
     @staticmethod
+    def _roughness_batch(curves: np.ndarray) -> np.ndarray:
+        """Jaggedness per curve (M, CURVE_SAMPLES, 2): mean absolute
+        second difference divided by mean absolute step. ~0 for analytic
+        curves, ~1 for mod-jump zigzags; capped at 1. Feeds fitness only,
+        never error/solve."""
+        if curves.shape[1] < 3:
+            return np.zeros(curves.shape[0])
+        d1 = curves[:, 1:] - curves[:, :-1]
+        d2 = d1[:, 1:] - d1[:, :-1]
+        den = np.abs(d1).mean(axis=(1, 2))
+        return np.minimum(np.abs(d2).mean(axis=(1, 2)) / (den + 1e-9), 1.0)
+
+    @staticmethod
     def _vkey(curves: np.ndarray, index: int) -> bytes:
         return np.round(curves[index], 4).tobytes()
 
@@ -373,6 +476,7 @@ class CurveGP:
         if xs_all is None:
             return CurveScore(INVALID_FITNESS, math.inf, False, None, None, size)
         error_sum = 0.0
+        rough_sum = 0.0
         vkey = b""
         for k, target in enumerate(self.targets):
             curves = np.empty((1, CURVE_SAMPLES, 2))
@@ -380,9 +484,13 @@ class CurveGP:
             curves[0, :, 1] = ys_all[k]
             d_ct, d_tc = self._batch_errors(curves, target.array)
             error_sum += min(1.0, float(0.5 * (d_ct[0] + d_tc[0])))
+            rough_sum += float(self._roughness_batch(curves)[0])
             vkey += np.round(curves, 4).tobytes()
         error = error_sum / self.n_strokes
-        fitness = (1.0 - error) - parsimony * size
+        rough = rough_sum / self.n_strokes
+        # Roughness only bends fitness (guides the search away from
+        # jagged shortcuts); error and the solve threshold stay honest.
+        fitness = (1.0 - error - SMOOTH_W * rough) - parsimony * size
         return CurveScore(fitness, error, error < SOLVE_ERROR, xs_all, ys_all,
                           size, vkey=vkey)
 
@@ -414,6 +522,7 @@ class CurveGP:
         if pending:
             parsimony = self.cfg.parsimony
             errors = np.zeros(len(pending))
+            rough = np.zeros(len(pending))
             vkeys: list[bytes] = [b""] * len(pending)
             for k, target in enumerate(self.targets):
                 curves = np.empty((len(pending), CURVE_SAMPLES, 2))
@@ -422,18 +531,20 @@ class CurveGP:
                     curves[row, :, 1] = scores[i].ys[k]
                 d_ct, d_tc = self._batch_errors(curves, target.array)
                 errors += np.minimum(1.0, 0.5 * (d_ct + d_tc))
+                rough += self._roughness_batch(curves)
                 # value-dedup key: the candidate's rounded curves across
                 # ALL strokes, built once per generation
                 rounded = np.round(curves, 4)
                 for row in range(len(pending)):
                     vkeys[row] += rounded[row].tobytes()
             errors /= self.n_strokes
+            rough /= self.n_strokes
             for row, i in enumerate(pending):
                 sc = scores[i]
                 error = float(errors[row])
                 scores[i] = CurveScore(
-                    (1.0 - error) - parsimony * sc.size, error,
-                    error < SOLVE_ERROR, sc.xs, sc.ys, sc.size,
+                    (1.0 - error - SMOOTH_W * rough[row]) - parsimony * sc.size,
+                    error, error < SOLVE_ERROR, sc.xs, sc.ys, sc.size,
                     vkey=vkeys[row])
         scored = list(zip(genomes, scores, strict=True))
         self.population = genomes
@@ -465,6 +576,7 @@ class CurveGP:
                 sc.fitness -= (counts[key] - 1) * 0.001
 
         scored.sort(key=lambda item: item[1].fitness, reverse=True)
+        self._memetic_refine(scored)
 
         # Adaptive anti-stagnation shock, same semantics as GPEngine.
         if new_best:
@@ -531,6 +643,36 @@ class CurveGP:
         return result
 
     # -- breeding ---------------------------------------------------------
+
+    def _memetic_refine(
+            self, scored: list[tuple[tuple[tuple[Node, Node], ...],
+                                     CurveScore]]) -> None:
+        """Local search on the fitness elite: T random single-constant
+        nudges per elite genome, keep the variant only if its fitness
+        (and error) improve. Writes replacements back into `scored` so
+        _breed sees the refined genomes. Crossover assembles shapes;
+        this walks the constants the pool cannot express exactly."""
+        if self.cfg.memetic_elite <= 0:
+            return
+        for idx, (genome, sc) in enumerate(scored[:self.cfg.memetic_elite]):
+            if sc.xs is None or sc.exact:
+                continue
+            best_g, best_sc = genome, sc
+            for _ in range(self.cfg.memetic_tries):
+                k = self.rng.randrange(self.n_strokes)
+                x, y = best_g[k]
+                i = self.rng.randrange(2)
+                tree = self._tweak_const(x if i == 0 else y)
+                if tree is None:
+                    continue
+                child = list(best_g)
+                child[k] = (tree, y) if i == 0 else (x, tree)
+                child_sc = self._score(tuple(child), self.cfg.parsimony)
+                if (child_sc.fitness > best_sc.fitness
+                        and child_sc.error < best_sc.error):
+                    best_g, best_sc = tuple(child), child_sc
+            if best_g is not genome:
+                scored[idx] = (best_g, best_sc)
 
     def _breed(self, scored: list[tuple[tuple[tuple[Node, Node], ...],
                                         CurveScore]]
