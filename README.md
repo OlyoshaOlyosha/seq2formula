@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-99%20passed-3FC07A)
+![Tests](https://img.shields.io/badge/tests-121%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 **Watch evolution discover the mathematical formulas behind number sequences.**
@@ -20,6 +20,8 @@ Everything runs locally on your machine. No internet access, no telemetry, and n
 ## Features
 
 - **Live Search Dashboard**: Watch formulas evolve in real-time with detailed charts for fitness, error, and population diversity.
+- **Curve Mode**: The same engine fits parametric formulas to 2D point sets — draw a circle, a spiral, a wave or even a multi-stroke smiley, and watch the search match your shape on a canvas.
+- **Neuro Engine (Stage 2)**: A reinforcement-learning alternative to the genetic search — a small neural policy (numpy only) assembles formulas token by token and trains live, with its own `/neuro` page full of learning curves, policy entropy and "what the network is thinking" token bars.
 - **Autopilot (Batch Mode)**: Queue up the entire library and let the engine solve puzzles one by one in the background.
 - **Advanced Math**: The engine supports basic arithmetic, roots, factorials, trigonometry (`sin`, `cos`), logarithms, and constants like π and e.
 - **65 Built-in Sequences**: A curated library of puzzles ranging from simple linear progressions to famous sequences like Fibonacci and Catalan numbers.
@@ -36,6 +38,8 @@ Everything runs locally on your machine. No internet access, no telemetry, and n
 
 The dashboard is built to be watched. The live view shows the best current formula rendered in beautiful typography, a top-5 leaderboard, and a live event feed. A mini-chart plots the found formula directly against your target sequence. 
 The Results tab tracks your history, maintains a "Hall of Fame" of the shortest formulas ever found, and collects "Curiosities" (absurd, near-miss formulas). You can pause, step through generation-by-generation, or accelerate the search at any time.
+
+The «Кривые» tab (curve mode) streams the same kind of statistics while the engine fits a formula curve to a target shape drawn on canvas. The «Нейро» tab opens the standalone neuro training page: reward and error curves, policy entropy, token probability bars and the best formula found so far, rendered with KaTeX.
 
 ## Getting started
 
@@ -79,10 +83,15 @@ Experimental, in continuous development.
   adaptive anti-stagnation shocks, weighted parsimony), and a settings
   sweep over the whole library; the live feed renders formulas with math
   typography, and any formula can be plotted next to its sequence.
-- Stage 2 (next) — reinforcement-learning engine that assembles formulas
-  step by step and is trained live, per puzzle; trained policies are
-  saved, reused and compared.
-- Later — recurrences, more statistics, more tuning experiments.
+- Curve mode (done) — a second engine that fits parametric formulas to
+  2D shapes on a canvas: shape presets, multi-stroke drawings, numpy
+  batch fitness and generic search tuning (trig seeds, coherent blocks,
+  memetic refinement).
+- Stage 2 — neuro engine (done) — a reinforcement-learning policy on
+  numpy that assembles formulas token by token and trains live per
+  puzzle, with a dedicated training-visualizer page.
+- Later — recurrences, neuro on higher-difficulty tiers, more statistics,
+  more tuning experiments.
 
 ## Notes
 
