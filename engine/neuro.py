@@ -106,6 +106,7 @@ class NeuroConfig:
     allowed_funcs: tuple[str, ...] = ()
     allowed_consts: tuple[float, ...] = DEFAULT_CONSTS
     parsimony: float = 0.001
+    max_generations: int = 1000
 
 
 class _Policy:
@@ -202,6 +203,7 @@ class NeuroEngine:
         self.policy = _Policy(self.in_dim, 48, len(self.vocab), self.nprng)
         self.generation = 0
         self.solved = False
+        self.solved_gen: int | None = None
         self.best_ever: Best | None = None
         self.baseline = 0.0
         self.stagnation = 0  # generations since the last new best fitness
@@ -248,13 +250,13 @@ class NeuroEngine:
 
         if tok == "var":
             return Var()
-        if tok.startswith("c"):
-            return Const(float(tok[1:]))
-        if tok == NEG_TOKEN:
-            return Neg(self._rollout_slot(budget - 1, SLOT_ARG, trace, aid))
-        if tok in self.funcs:
+        if tok in self.funcs:  # before the const check: "cos" starts with c
             return UnOp(tok, self._rollout_slot(budget - 1, SLOT_ARG,
                                                 trace, aid))
+        if tok == NEG_TOKEN:
+            return Neg(self._rollout_slot(budget - 1, SLOT_ARG, trace, aid))
+        if tok.startswith("c"):
+            return Const(float(tok[1:]))
         if tok in (POW_NK, POW_KN):
             # constant side first: one const-only decision, then the
             # single open slot (n^k -> slot is the base, k^n -> exponent)
@@ -418,11 +420,14 @@ class NeuroEngine:
             or valid[0][1].fitness > self.best_ever.score.fitness)
         solved_now = bool(valid) and valid[0][1].exact
         self.solved = self.solved or solved_now
+        if solved_now and self.solved_gen is None:
+            self.solved_gen = self.generation - 1  # 0-based, like the GP
         if valid and (self.best_ever is None
                       or valid[0][1].fitness > self.best_ever.score.fitness):
             self.best_ever = Best(valid[0][0], valid[0][1])
         if self.best_ever is not None:
             stats["best_fitness"] = self.best_ever.score.fitness
+            stats["best_error"] = self.best_ever.score.error
 
         # stagnation shock: perturb the policy weights and reset the
         # baseline so stale reward levels stop anchoring the advantages
@@ -437,6 +442,14 @@ class NeuroEngine:
             self.baseline = stats["reward"]
             self.stagnation = 0
         stats["shock"] = shock
+
+        # "what the network is thinking": marginal token distribution at
+        # the root decision right now — the dashboard draws it as bars
+        root_state = self._state_vec(self.cfg.max_depth, SLOT_ROOT, 0)
+        root_p, _ = self.policy.forward(root_state[None, :])
+        order = np.argsort(root_p[0])[::-1][:8]
+        stats["root_probs"] = [[self.vocab[i], float(root_p[0][i])]
+                               for i in order]
 
         top = [b.payload() for _, b in
                ((n, Best(n, sc)) for n, sc in valid[:5])]
@@ -455,8 +468,10 @@ class NeuroEngine:
             population=self.cfg.population,
         )
 
+    @property
     def done(self) -> bool:
-        return self.solved
+        """No reason to continue: solved, or out of generations."""
+        return self.solved or self.generation >= self.cfg.max_generations
 
     def payload(self) -> dict:  # mirror GPEngine.payload shape
         return {"mode": "neuro", "generation": self.generation}

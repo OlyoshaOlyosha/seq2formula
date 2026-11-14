@@ -83,3 +83,14 @@ def test_var_candidate_is_legal() -> None:
     eng = NeuroEngine([1.0, 2.0], NeuroConfig(seed=3))
     eng.step()
     assert eng.best_ever is not None
+
+
+def test_func_tokens_do_not_parse_as_consts() -> None:
+    """"cos"/"cbrt" start with "c" — they must build UnOp nodes, never
+    crash the const parser (caught live: ValueError float("os"))."""
+    eng = NeuroEngine([1.0, 2.0, 3.0],
+                      NeuroConfig(seed=4, allowed_funcs=("sqrt", "sin",
+                                                         "cos", "cbrt")))
+    for _ in range(10):
+        eng.step()
+    assert eng.best_ever is not None

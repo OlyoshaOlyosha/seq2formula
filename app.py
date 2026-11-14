@@ -39,6 +39,9 @@ from engine import (
 )
 from engine.curve import MAX_STROKES
 from engine.grammar import BINARY_OPS
+from engine.neuro import DEFAULT_CONSTS as DEFAULT_NEURO_CONSTS
+from engine.neuro import NeuroConfig, NeuroEngine
+from engine.nodes import special_value
 
 # Grammar feature tokens the dashboard may send in RunRequest.ops: binary
 # operators, unary functions and special constants, one flat list — the
@@ -144,7 +147,8 @@ def hall_of_fame() -> list[dict]:
 # --------------------------------------------------------------------------
 
 class RunRequest(BaseModel):
-    mode: str = Field(default="sequence", pattern="^(sequence|curve)$")
+    mode: str = Field(default="sequence",
+                      pattern="^(sequence|curve|neuro)$")
     terms: list[float] | None = None
     points: list[list[float]] | None = None  # curve mode: one-stroke cloud
     # curve mode, multi-stroke drawing: each stroke gets its own x/y pair
@@ -201,7 +205,7 @@ class SpeedRequest(BaseModel):
 
 class RunManager:
     def __init__(self) -> None:
-        self.engine: GPEngine | CurveGP | None = None
+        self.engine: GPEngine | CurveGP | NeuroEngine | None = None
         self.task: asyncio.Task | None = None
         self.status: str = "idle"  # idle | running | paused | finished
         self.delay: float = 1.0 / DEFAULT_GPS
@@ -289,7 +293,7 @@ class RunManager:
             self.points = [list(p) for stroke in strokes for p in stroke]
             self.terms = []
             self.curve_preset = request.preset
-        else:
+        elif request.mode == "sequence":
             config = GPConfig(
                 **common,
                 parsimony=(request.parsimony if request.parsimony is not None
@@ -300,6 +304,39 @@ class RunManager:
             )
             terms, puzzle = self._resolve_terms(request)
             self.engine = GPEngine(terms, config)
+            self.terms = terms
+            self.points = None
+            self.strokes = None
+        else:  # neuro
+            # The neuro engine shares seed / population / generation budget /
+            # grammar with the sequence run; its own knobs (lr, entropy) are
+            # module-level constants, not dashboard settings. _validate_grammar
+            # returns None for "the full set" — the neuro vocab needs concrete
+            # tuples, so the defaults are substituted here.
+            config = NeuroConfig(
+                seed=seed,
+                population=(request.population if request.population is not None
+                            else settings["population"]),
+                max_generations=(request.max_generations
+                                 if request.max_generations is not None
+                                 else settings["max_generations"]),
+                parsimony=(request.parsimony if request.parsimony is not None
+                           else 0.001),
+                allowed_ops=(allowed_ops
+                             or tuple(o for o in BINARY_OPS if o != "^")
+                             + ("^",)),
+                allowed_funcs=allowed_funcs
+                              or tuple(UNARY_FUNCS),
+                # allowed_consts here are grammar TOKENS (pi/e); the neuro
+                # vocab wants float constants — the numeric pool is always
+                # present, enabled specials join it as floats
+                allowed_consts=DEFAULT_NEURO_CONSTS + tuple(
+                    v for v in (special_value(t) for t in
+                                (allowed_consts or ("pi", "e")))
+                    if v is not None),
+            )
+            terms, puzzle = self._resolve_terms(request)
+            self.engine = NeuroEngine(terms, config)
             self.terms = terms
             self.points = None
             self.strokes = None
@@ -321,12 +358,16 @@ class RunManager:
             "seed": config.seed,
             "population": config.population,
             "parsimony": config.parsimony,
-            "p_mutate": config.p_mutate,
-            "p_crossover": config.p_crossover,
-            "tournament": config.tournament,
-            "elitism": config.elitism,
-            "speed": request.speed,
+            "mode": request.mode,
         }
+        if request.mode != "neuro":
+            self.config_summary.update({
+                "p_mutate": config.p_mutate,
+                "p_crossover": config.p_crossover,
+                "tournament": config.tournament,
+                "elitism": config.elitism,
+            })
+        self.config_summary["speed"] = request.speed
         self.task = asyncio.get_running_loop().create_task(self._loop())
         return self.snapshot()
 
@@ -582,6 +623,10 @@ class RunManager:
                         next_gen += self.delay
                     result = await loop.run_in_executor(None, self.engine.step)
                     self.last_gen = result.payload()
+                    if isinstance(self.engine, NeuroEngine):
+                        # the shared GenerationResult payload has no mode
+                        # field; the neuro page filters on it
+                        self.last_gen = {**self.last_gen, "mode": "neuro"}
                     await self.broadcast(self.last_gen)
                     if result.solved_now:
                         self.solved_wall_time = time.perf_counter() - self.started_at
@@ -596,6 +641,11 @@ class RunManager:
                     await asyncio.sleep(0.05)
         except asyncio.CancelledError:
             pass
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.status = "finished"
+            self.finish_reason = "engine_error"
 
     async def _finalize(self) -> None:
         """Persist the finished run and announce the outcome."""
@@ -634,8 +684,9 @@ class RunManager:
             _save_json(CURVES_FILE, curves[-CURVES_CAP:])
         elif not solved:
             self._save_custom_best()
-        if solved and self.mode == "sequence":
-            best = self.engine.shortest_exact or self.engine.best_ever
+        if solved and self.mode in ("sequence", "neuro"):
+            best = (getattr(self.engine, "shortest_exact", None)
+                    or self.engine.best_ever)
             entry = {
                 "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "seq_key": _seq_key(self.terms),
@@ -646,7 +697,11 @@ class RunManager:
                 "size": best.score.size,
                 "values": ([round(v, 6) for v in best.score.values]
                            if best.score.values else None),
-                "generations": self.engine.solved_gen + 1,
+                "generations": (getattr(self.engine, "solved_gen",
+                                        self.engine.generation) + 1
+                                if getattr(self.engine, "solved_gen", None)
+                                is not None
+                                else self.engine.generation),
                 "time_s": round(self.solved_wall_time or
                                 (time.perf_counter() - self.started_at), 3),
                 "settings": self.config_summary,
@@ -955,6 +1010,13 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 def index() -> FileResponse:
     # no-store: the page must always match the static assets beside it
     return FileResponse(ROOT / "static" / "index.html",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/neuro")
+def neuro_page() -> FileResponse:
+    # standalone training-visualizer page for the neuro engine
+    return FileResponse(ROOT / "static" / "neuro.html",
                         headers={"Cache-Control": "no-store"})
 
 
