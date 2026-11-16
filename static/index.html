@@ -261,6 +261,16 @@
             </button>
             <button class="btn" id="curveUndoBtn" disabled title="Убрать последний штрих">Отменить штрих</button>
             <button class="btn" id="curveClearBtn">Очистить</button>
+            <select id="curveGridSel" class="input puzzle-filter-select"
+                    title="Привязка рисования к узлам сетки: линию проще провести ровно"
+                    aria-label="Размер сетки для привязки рисования">
+              <option value="0">свободное рисование</option>
+              <option value="8">сетка 8×8</option>
+              <option value="12">сетка 12×12</option>
+              <option value="16">сетка 16×16</option>
+              <option value="24">сетка 24×24</option>
+              <option value="32">сетка 32×32</option>
+            </select>
           </div>
           <label class="seed field-inline">
             <span class="field-label">Seed</span>

@@ -40,6 +40,7 @@ const state = {
   lastCurveTexts: "",
   curveLog: [],            // curve race log entries, newest first
   curvePreset: null,       // name of the loaded preset shape (or null)
+  curveGrid: 0,            // grid cells per side for snapping (0 = freehand)
   lastCurveTopUpdate: 0,   // throttle the curve top list
   wasCurveShocking: false, // dedupe shock entries in the curve race log
   lastCurveLogGen: null,   // throttle "new best" entries
@@ -1050,10 +1051,24 @@ function initCurveCanvas() {
 
   const toUnit = (e) => {
     const rect = canvas.getBoundingClientRect();
-    return {
+    const p = {
       x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
       y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
     };
+    // grid mode: snap to the nearest grid node so strokes come out straight
+    if (state.curveGrid > 0) {
+      p.x = Math.round(p.x * state.curveGrid) / state.curveGrid;
+      p.y = Math.round(p.y * state.curveGrid) / state.curveGrid;
+    }
+    return p;
+  };
+
+  const pushPoint = (p) => {
+    const cur = state.curveStroke;
+    // skip duplicates: snapped points repeat while the pointer is still
+    if (cur.length && cur[cur.length - 1].x === p.x &&
+        cur[cur.length - 1].y === p.y) return;
+    cur.push(p);
   };
 
   canvas.addEventListener("pointerdown", (e) => {
@@ -1070,7 +1085,7 @@ function initCurveCanvas() {
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!state.curveDrawing || !editable()) return;
-    state.curveStroke.push(toUnit(e));
+    pushPoint(toUnit(e));
     drawCurveCanvas();
   });
   const finishStroke = () => {
@@ -1090,6 +1105,20 @@ function initCurveCanvas() {
   };
   canvas.addEventListener("pointerup", finishStroke);
   canvas.addEventListener("pointercancel", finishStroke);
+
+  const sel = $("curveGridSel");
+  if (sel) {
+    const saved = Number(localStorage.getItem("curveGrid") || "0");
+    if ([8, 12, 16, 24, 32].includes(saved)) {
+      state.curveGrid = saved;
+      sel.value = String(saved);
+    }
+    sel.addEventListener("change", () => {
+      state.curveGrid = Number(sel.value) || 0;
+      localStorage.setItem("curveGrid", sel.value);
+      drawCurveCanvas();
+    });
+  }
 }
 
 function drawCurveCanvas() {
@@ -1103,6 +1132,24 @@ function drawCurveCanvas() {
   ctx.strokeStyle = CHART_COLORS.grid;
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, W - 2, H - 2);
+
+  // snap grid: shows where strokes will land in grid mode
+  if (state.curveGrid > 0) {
+    ctx.strokeStyle = CHART_COLORS.grid;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.5;
+    const N = state.curveGrid;
+    ctx.beginPath();
+    for (let i = 1; i < N; i++) {
+      const v = (i / N) * W;
+      ctx.moveTo(v, 0);
+      ctx.lineTo(v, H);
+      ctx.moveTo(0, v);
+      ctx.lineTo(W, v);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
   // target points — the drawing the user made
   ctx.fillStyle = CHART_COLORS.faint;
