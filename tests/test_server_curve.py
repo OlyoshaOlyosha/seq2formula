@@ -20,7 +20,7 @@ def test_validate_points() -> None:
     with pytest.raises(HTTPException):
         RunManager._validate_points([[0.5, 0.5]])  # need >= 2
     with pytest.raises(HTTPException):
-        RunManager._validate_points([[0.5, 0.5]] * 201)  # need <= 200
+        RunManager._validate_points([[0.5, 0.5]] * 601)  # need <= 600
     with pytest.raises(HTTPException):
         RunManager._validate_points([[1.5, 0.1], [0.2, 0.2]])  # unit square
     with pytest.raises(HTTPException):
@@ -97,14 +97,14 @@ def test_stroke_validation() -> None:
     with pytest.raises(HTTPException):
         RunManager._validate_strokes(None)
     with pytest.raises(HTTPException):
-        RunManager._validate_strokes([[[0.5, 0.5]]] * 7)  # stroke cap
+        RunManager._validate_strokes([[[0.5, 0.5]]] * 13)  # stroke cap
     with pytest.raises(HTTPException):
         RunManager._validate_strokes([[[1.5, 0.1], [0.2, 0.2]]])  # unit square
     with pytest.raises(HTTPException):
         RunManager._validate_strokes([[[0.0], [1.0, 1.0]]])  # not [x, y] pairs
     with pytest.raises(HTTPException):
         RunManager._validate_strokes(
-            [[[float(i) / 100, 0.5]] for i in range(201)])  # point cap
+            [[[float(i) / 600, 0.5]] for i in range(601)])  # point cap
 
 
 def test_sequence_mode_rejected_points_and_vice_versa(tmp_path) -> None:

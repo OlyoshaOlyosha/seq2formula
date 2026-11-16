@@ -238,12 +238,26 @@
           <span class="head-right"><span class="chip" id="curveChip">нет прогона</span></span>
         </div>
         <p class="field-hint">Зажмите мышь и ведите — штрих превратится в точки цели.
-          Каждый новый зажим начинает отдельный штрих (до 6), у каждого
+          Каждый новый зажим начинает отдельный штрих (до 12), у каждого
           штриха — своя пара формул x(t), y(t). Одиночный клик ставит
           точку. Серые точки — ваша цель, индиго-линии — лучшие кривые.</p>
         <div class="preset-row" id="presetRow" role="group" aria-label="Готовые фигуры">
           <span class="ops-label">Заготовки</span>
           <!-- preset buttons are built by JS from CURVE_PRESETS -->
+        </div>
+        <div class="preset-row" role="group" aria-label="Мои фигуры">
+          <span class="ops-label">Мои фигуры</span>
+          <select id="curveMySel" class="input puzzle-filter-select"
+                  title="Сохранённые рисунки (лежат на сервере, доступны в любом браузере)">
+            <option value="">— загрузить фигуру —</option>
+          </select>
+          <input type="text" id="curveSaveName" class="input seed-field"
+                 maxlength="60" placeholder="имя фигуры" autocomplete="off"
+                 title="Как назвать рисунок при сохранении"
+                 aria-label="Имя сохраняемой фигуры">
+          <button class="btn" id="curveSaveBtn" title="Сохранить текущий рисунок на сервер">Сохранить</button>
+          <button class="btn" id="curveDelBtn" disabled
+                  title="Удалить выбранный рисунок с сервера">Удалить</button>
         </div>
         <div class="curve-canvas-wrap">
           <canvas id="curveCanvas" width="800" height="800"

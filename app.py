@@ -56,11 +56,13 @@ CURIOSITY_FILE = DATA_DIR / "curiosities.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 CURVES_FILE = DATA_DIR / "curves.json"
 CURVE_CURIOSITY_FILE = DATA_DIR / "curve_curiosities.json"
+DRAWINGS_FILE = DATA_DIR / "curve_drawings.json"
 HISTORY_CAP = 500        # solved runs kept in the file
 CURIOSITY_CAP = 60       # gallery entries kept across all runs
 CURIOSITY_PER_RUN = 4    # best entries saved from one run
 CURVES_CAP = 100         # finished curve runs kept in the file
 CURVE_CURIOSITY_CAP = 40  # near-miss curve drawings kept in the gallery
+DRAWINGS_CAP = 50        # user-saved drawings kept in the file
 # a curve curiosity = a finished unsolved run whose best pair still came
 # visibly close (two-sided distance in [0.2%, 10%]) — the funny
 # "almost circled it with a polygon" band worth keeping
@@ -68,7 +70,7 @@ CURVE_CURIOSITY_MIN, CURVE_CURIOSITY_MAX = 0.002, 0.10
 
 MIN_TERMS, MAX_TERMS = 2, 32
 TERM_ABS_LIMIT = 1e9
-MIN_POINTS, MAX_POINTS = 2, 200   # curve-mode target point cloud bounds
+MIN_POINTS, MAX_POINTS = 2, 600   # curve-mode target point cloud bounds
 DEFAULT_GPS = 100.0
 
 # Engine knobs the Настройки tab can change; a fresh store starts here.
@@ -438,12 +440,14 @@ class RunManager:
         return pts
 
     @staticmethod
+    @staticmethod
     def _validate_strokes(
             strokes: list[list[list[float]]] | None,
     ) -> list[list[tuple[float, float]]]:
-        """Multi-stroke curve target: 1..6 strokes, up to 200 points in
-        total, every point in the unit square. A single-point stroke is
-        kept — the engine pads it to two identical points."""
+        """Multi-stroke curve target: up to MAX_STROKES strokes, up to
+        MAX_POINTS points in total, every point in the unit square. A
+        single-point stroke is kept — the engine pads it to two identical
+        points."""
         if not strokes:
             raise HTTPException(422, "curve mode requires strokes")
         if not (1 <= len(strokes) <= MAX_STROKES):
@@ -453,7 +457,8 @@ class RunManager:
         total = 0
         for stroke in strokes:
             if not stroke or len(stroke) > MAX_POINTS:
-                raise HTTPException(422, "each stroke needs 1..200 points")
+                raise HTTPException(
+                    422, f"each stroke needs 1..{MAX_POINTS} points")
             pts: list[tuple[float, float]] = []
             for p in stroke:
                 if len(p) != 2:
@@ -959,6 +964,46 @@ def get_curves() -> dict:
 def get_curve_curiosities() -> dict:
     return {"curiosities": list(reversed(_load_json(CURVE_CURIOSITY_FILE, [])))
             [:CURVE_CURIOSITY_CAP]}
+
+
+class DrawingRequest(BaseModel):
+    """A user-saved curve drawing: named list of unit-square strokes."""
+    name: str = Field(min_length=1, max_length=60)
+    strokes: list[list[list[float]]]
+
+
+@app.get("/api/drawings")
+def get_drawings() -> dict:
+    return {"drawings": list(reversed(_load_json(DRAWINGS_FILE, [])))
+            [:DRAWINGS_CAP]}
+
+
+@app.post("/api/drawings")
+def save_drawing(request: DrawingRequest) -> dict:
+    # reuse the run-target validation: same bounds, same point checks
+    strokes = RunManager._validate_strokes(request.strokes)
+    drawings = _load_json(DRAWINGS_FILE, [])
+    # re-saving an existing name replaces it (it is the drawing's key)
+    drawings = [d for d in drawings if d["name"] != request.name]
+    drawings.append({
+        "id": int(time.time() * 1000),
+        "name": request.name,
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "strokes": [[[round(x, 6), round(y, 6)] for x, y in stroke]
+                    for stroke in strokes],
+    })
+    _save_json(DRAWINGS_FILE, drawings[-DRAWINGS_CAP:])
+    return {"ok": True}
+
+
+@app.delete("/api/drawings/{drawing_id}")
+def delete_drawing(drawing_id: int) -> dict:
+    drawings = _load_json(DRAWINGS_FILE, [])
+    rest = [d for d in drawings if d["id"] != drawing_id]
+    if len(rest) == len(drawings):
+        raise HTTPException(404, "no such drawing")
+    _save_json(DRAWINGS_FILE, rest)
+    return {"ok": True}
 
 
 @app.get("/api/settings")

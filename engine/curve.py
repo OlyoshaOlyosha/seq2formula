@@ -72,8 +72,9 @@ SOLVE_ERROR = 0.02
 DIST_CHUNK = 128
 SIZE_HIST_BINS = 20
 # Hard cap on strokes per drawing: init/scoring cost scales linearly
-# with the stroke count, and a smiley needs 4.
-MAX_STROKES = 6
+# with the stroke count; a smiley needs 4, detailed grid drawings go up
+# to a dozen.
+MAX_STROKES = 12
 # Curve targets live in the unit square, so the search needs fractional
 # building blocks (stroke offsets like 0.25, affine maps like 0.1+0.8t)
 # that the integer-oriented grammar can otherwise only assemble through

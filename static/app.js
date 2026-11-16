@@ -882,8 +882,8 @@ function applyStatusMsg(msg) {
 const SOLVE_ERROR_JS = 0.02;
 const CURVE_SAMPLES_JS = 128;     // mirror of engine CURVE_SAMPLES
 const CURVE_STROKE_POINTS = 64;   // stroke resample target (engine upsamples)
-const MAX_CURVE_POINTS = 200;     // server-side cap, mirrored here
-const MAX_CURVE_STROKES = 6;      // mirror of engine MAX_STROKES
+const MAX_CURVE_POINTS = 600;     // server-side cap, mirrored here
+const MAX_CURVE_STROKES = 12;     // mirror of engine MAX_STROKES
 
 /* Normalized accessors: gallery entries may hold the new `strokes` list
    or the legacy single-stroke `points` flat cloud; ASTs became per-stroke
@@ -1034,9 +1034,19 @@ function smoothStroke(raw) {
   return pts;
 }
 
+/* Drop consecutive duplicate points (the grid snap produces them while
+   the pointer lingers inside one cell). */
+function dedupeStroke(raw) {
+  const out = [];
+  for (const p of raw) {
+    const last = out[out.length - 1];
+    if (!last || last.x !== p.x || last.y !== p.y) out.push(p);
+  }
+  return out;
+}
+
 /* Eraser: drop every target point within the brush radius of the pointer
-   (radius is canvas pixels converted to the unit square). */
-function eraseAt(p) {
+   (radius is canvas pixels converted to the unit square). */function eraseAt(p) {
   const r = 24 / 800;  // ~24 px brush on the 800px canvas
   let changed = false;
   const kept = [];
@@ -1088,6 +1098,76 @@ function resampleStroke(raw) {
   return out;
 }
 
+/* ---- user-saved drawings (server-side, survive any browser) ---- */
+
+async function loadSavedDrawings() {
+  const data = await api("/api/drawings");
+  const sel = $("curveMySel");
+  sel.innerHTML = '<option value="">— загрузить фигуру —</option>';
+  for (const d of data.drawings) {
+    const opt = document.createElement("option");
+    opt.value = String(d.id);
+    opt.textContent = `${d.name} (${d.strokes.length} штрихов)`;
+    opt.dataset.strokes = JSON.stringify(d.strokes);
+    sel.appendChild(opt);
+  }
+  $("curveDelBtn").disabled = !data.drawings.length;
+}
+
+function wireSavedDrawings() {
+  const sel = $("curveMySel");
+  sel.addEventListener("change", () => {
+    const opt = sel.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    state.curveStrokes =
+      JSON.parse(opt.dataset.strokes).map((stroke) =>
+        stroke.map((p) => Array.isArray(p) ? { x: p[0], y: p[1] } : { ...p }));
+    state.curveBestCurves = null;
+    state.curveSolved = false;
+    state.curvePreset = null;
+    drawCurveCanvas();
+    syncCurveUI();
+  });
+  $("curveSaveBtn").addEventListener("click", async () => {
+    if (!state.curveStrokes.length) {
+      alertErr("нечего сохранять: рисунок пуст");
+      return;
+    }
+    const name = $("curveSaveName").value.trim();
+    if (!name) {
+      alertErr("введите имя фигуры в поле слева от кнопки");
+      return;
+    }
+    try {
+      const resp = await fetch("/api/drawings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          strokes: state.curveStrokes.map((stroke) =>
+            stroke.map((p) => [p.x, p.y])),
+        }),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).detail || "HTTP " + resp.status);
+      await loadSavedDrawings();
+      // re-select the just-saved name in the reloaded list
+      const opt = Array.from(sel.options).find((o) => o.textContent.startsWith(name));
+      if (opt) sel.value = opt.value;
+      $("curveDelBtn").disabled = false;
+      $("curveSaveName").value = "";
+    } catch (e) { alertErr("не удалось сохранить: " + e.message); }
+  });
+  $("curveDelBtn").addEventListener("click", async () => {
+    const opt = sel.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    try {
+      const resp = await fetch(`/api/drawings/${opt.value}`, { method: "DELETE" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      await loadSavedDrawings();
+    } catch (e) { alertErr("не удалось удалить: " + e.message); }
+  });
+}
+
 function initCurveCanvas() {
   const canvas = $("curveCanvas");
 
@@ -1125,7 +1205,7 @@ function initCurveCanvas() {
       return;
     }
     if (state.curveStrokes.length >= MAX_CURVE_STROKES) {
-      alertErr("максимум 6 штрихов");
+      alertErr(`максимум ${MAX_CURVE_STROKES} штрихов`);
       return;
     }
     canvas.setPointerCapture(e.pointerId);
@@ -1155,11 +1235,14 @@ function initCurveCanvas() {
     // stroke is already straight between nodes, smoothing it would ruin it
     const raw = (state.curveSmooth && state.curveGrid === 0)
       ? smoothStroke(state.curveStroke) : state.curveStroke;
-    const pts = resampleStroke(raw);
+    // grid strokes keep only their corner nodes — compact and exact;
+    // freehand strokes are resampled to ~64 evenly spaced points
+    const pts = state.curveGrid > 0
+      ? dedupeStroke(raw) : resampleStroke(raw);
     state.curveStroke = [];
     if (totalCurvePoints() + pts.length > MAX_CURVE_POINTS) {
       state.curveStrokes.pop();  // drop the stroke we opened
-      alertErr("максимум 200 точек цели");
+      alertErr(`максимум ${MAX_CURVE_POINTS} точек цели`);
     } else {
       state.curveStrokes[state.curveStrokes.length - 1] = pts;
       state.curvePreset = null;  // hand-drawn now, not a preset
@@ -3165,6 +3248,8 @@ function bindControls() {
 resetBuffers();
 makeCharts();
 initCurveCanvas();
+wireSavedDrawings();
+loadSavedDrawings().catch(() => {});
 resetCurveState();
 bindControls();
 refreshAll();
