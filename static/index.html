@@ -260,7 +260,11 @@
               Стоп
             </button>
             <button class="btn" id="curveUndoBtn" disabled title="Убрать последний штрих">Отменить штрих</button>
+            <button class="btn" id="curveEraseBtn" aria-pressed="false"
+                    title="Ластик: зажмите и ведите по холсту — точки рисунка рядом с курсором стираются">Ластик</button>
             <button class="btn" id="curveClearBtn">Очистить</button>
+            <button class="btn" id="curveSmoothBtn" aria-pressed="false"
+                    title="Смягчать углы штрихов при рисовании (только в свободном режиме)">Сгладить</button>
             <select id="curveGridSel" class="input puzzle-filter-select"
                     title="Привязка рисования к узлам сетки: линию проще провести ровно"
                     aria-label="Размер сетки для привязки рисования">
@@ -456,6 +460,10 @@
         <table class="list-table" id="curioTable" hidden>
           <thead><tr><th>Последовательность</th><th>Формула</th><th class="num">Размер</th><th class="num">Ошибка</th><th class="num">Поколение</th></tr></thead>
           <tbody id="curioRows"></tbody>
+        </table>
+        <table class="list-table" id="curveCurioTable" hidden>
+          <thead><tr><th>Фигура</th><th>Кривые</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
+          <tbody id="curveCurioRows"></tbody>
         </table>
       </div>
     </section>

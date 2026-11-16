@@ -41,6 +41,9 @@ const state = {
   curveLog: [],            // curve race log entries, newest first
   curvePreset: null,       // name of the loaded preset shape (or null)
   curveGrid: 0,            // grid cells per side for snapping (0 = freehand)
+  curveErase: false,       // eraser toggle: pointer removes nearby points
+  curveErasing: false,     // an erase gesture is in progress
+  curveSmooth: false,      // round the corners of freehand strokes
   lastCurveTopUpdate: 0,   // throttle the curve top list
   wasCurveShocking: false, // dedupe shock entries in the curve race log
   lastCurveLogGen: null,   // throttle "new best" entries
@@ -999,6 +1002,8 @@ function syncCurveUI() {
   $("curveUndoBtn").disabled = running || !state.curveStrokes.length;
   // the target is baked into the engine at start — no edits mid-run
   $("curveClearBtn").disabled = running;
+  $("curveEraseBtn").disabled = running;
+  $("curveSmoothBtn").disabled = running;
   $("curveCanvas").classList.toggle("locked", running);
   const chip = $("curveChip");
   if (state.status === "running") chip.textContent = "поиск идёт";
@@ -1008,6 +1013,46 @@ function syncCurveUI() {
   const showLive = state.mode === "curve" && (running || state.status === "finished");
   $("curveEmpty").hidden = showLive;
   $("curveLive").hidden = !showLive;
+}
+
+/* Round the corners of a raw freehand stroke: two passes of Chaikin
+   corner cutting (75/25) before resampling. Only for freehand mode —
+   grid strokes are already straight between their nodes. */
+function smoothStroke(raw) {
+  if (!raw || raw.length < 3) return raw;
+  let pts = raw;
+  for (let pass = 0; pass < 2; pass++) {
+    const out = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      out.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 },
+               { x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
+  return pts;
+}
+
+/* Eraser: drop every target point within the brush radius of the pointer
+   (radius is canvas pixels converted to the unit square). */
+function eraseAt(p) {
+  const r = 24 / 800;  // ~24 px brush on the 800px canvas
+  let changed = false;
+  const kept = [];
+  for (const stroke of state.curveStrokes) {
+    const rest = stroke.filter((q) => {
+      const far = Math.hypot(q.x - p.x, q.y - p.y) > r;
+      if (!far) changed = true;
+      return far;
+    });
+    if (rest.length) kept.push(rest);
+  }
+  if (!changed) return;
+  state.curveStrokes = kept;
+  state.curvePreset = null;  // hand-edited now, not a preset
+  syncCurveUI();
+  drawCurveCanvas();
 }
 
 /* Resample a freehand stroke to ~64 evenly spaced points (by arc length,
@@ -1073,6 +1118,12 @@ function initCurveCanvas() {
 
   canvas.addEventListener("pointerdown", (e) => {
     if (!editable()) return;
+    if (state.curveErase) {
+      canvas.setPointerCapture(e.pointerId);
+      state.curveErasing = true;
+      eraseAt(toUnit(e));
+      return;
+    }
     if (state.curveStrokes.length >= MAX_CURVE_STROKES) {
       alertErr("максимум 6 штрихов");
       return;
@@ -1084,14 +1135,27 @@ function initCurveCanvas() {
     drawCurveCanvas();
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (!state.curveDrawing || !editable()) return;
+    if (!editable()) return;
+    if (state.curveErasing) {
+      eraseAt(toUnit(e));
+      return;
+    }
+    if (!state.curveDrawing) return;
     pushPoint(toUnit(e));
     drawCurveCanvas();
   });
   const finishStroke = () => {
+    if (state.curveErasing) {
+      state.curveErasing = false;
+      return;
+    }
     if (!state.curveDrawing) return;
     state.curveDrawing = false;
-    const pts = resampleStroke(state.curveStroke);
+    // smoothing rounds the corners of freehand strokes; a snapped grid
+    // stroke is already straight between nodes, smoothing it would ruin it
+    const raw = (state.curveSmooth && state.curveGrid === 0)
+      ? smoothStroke(state.curveStroke) : state.curveStroke;
+    const pts = resampleStroke(raw);
     state.curveStroke = [];
     if (totalCurvePoints() + pts.length > MAX_CURVE_POINTS) {
       state.curveStrokes.pop();  // drop the stroke we opened
@@ -1117,6 +1181,26 @@ function initCurveCanvas() {
       state.curveGrid = Number(sel.value) || 0;
       localStorage.setItem("curveGrid", sel.value);
       drawCurveCanvas();
+    });
+  }
+
+  // eraser + smoothing toggles, persisted like the grid choice
+  const eraseBtn = $("curveEraseBtn");
+  if (eraseBtn) {
+    eraseBtn.addEventListener("click", () => {
+      state.curveErase = !state.curveErase;
+      eraseBtn.setAttribute("aria-pressed", String(state.curveErase));
+    });
+  }
+  const smoothBtn = $("curveSmoothBtn");
+  if (smoothBtn) {
+    const savedSmooth = localStorage.getItem("curveSmooth") === "1";
+    state.curveSmooth = savedSmooth;
+    smoothBtn.setAttribute("aria-pressed", String(savedSmooth));
+    smoothBtn.addEventListener("click", () => {
+      state.curveSmooth = !state.curveSmooth;
+      localStorage.setItem("curveSmooth", state.curveSmooth ? "1" : "0");
+      smoothBtn.setAttribute("aria-pressed", String(state.curveSmooth));
     });
   }
 }
@@ -2207,6 +2291,59 @@ async function loadShapes() {
   }
 }
 
+/* Curve curiosities: finished unsolved runs whose best pair came visibly
+   close ("polygon instead of a circle"). Click = load the drawing onto
+   the curve canvas, like the shapes table. */
+async function loadCurveCuriosities() {
+  const data = await api("/api/curve_curiosities");
+  const rows = $("curveCurioRows");
+  rows.innerHTML = "";
+  if (!data.curiosities.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "list-empty";
+    td.textContent = "Кривых-курьёзов пока нет: появятся после незакрытых прогонов, где кривая почти попала.";
+    tr.appendChild(td);
+    rows.appendChild(tr);
+    return;
+  }
+  for (const c of data.curiosities) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable-row";
+    tr.title = "Открыть этот рисунок на вкладке «Кривые»";
+    tr.addEventListener("click", () => {
+      state.curveStrokes = entryStrokes(c).map((stroke) =>
+        stroke.map((p) => Array.isArray(p) ? { x: p[0], y: p[1] } : { ...p }));
+      state.curveBestCurves = null;
+      state.curveSolved = false;
+      state.curvePreset = c.preset || null;
+      drawCurveCanvas();
+      syncCurveUI();
+      $("ptabCurves").click();
+    });
+    tr.dataset.search =
+      ((c.preset || "свой рисунок") + " " + (c.x_text || []).join(" ")
+       + " " + (c.y_text || []).join(" ") + " " + c.error).toLowerCase();
+
+    addCell(tr, "td", c.preset || "свой рисунок");
+    const f = addCell(tr, "td", "");
+    const xs = astList(c.x_ast);
+    const ys = astList(c.y_ast);
+    if (xs.length && ys.length) {
+      renderKatex(f,
+        `x(t)=${astToLatexT(xs[0])},\\ y(t)=${astToLatexT(ys[0])}`
+        + (xs.length > 1 ? `\\ \\ldots (${xs.length})` : ""), false);
+    } else {
+      f.textContent = (c.x_text || []).join(" | ") + " / " +
+                      (c.y_text || []).join(" | ");
+    }
+    addCell(tr, "td", fmtPercent(c.error), "num");
+    addCell(tr, "td", String(c.generations), "num");
+    rows.appendChild(tr);
+  }
+}
+
 function highlightActiveRow() {
   document.querySelectorAll("tbody tr").forEach(tr => tr.classList.remove("active-autopilot"));
   if (state.status === "running" && state.mode === "sequence" && state.puzzleTerms) {
@@ -2255,7 +2392,8 @@ function refreshAll() {
     loadCuriosities().catch(() => {}),
     loadStats().catch(() => {}),
     loadCurves().catch(() => {}),
-    loadShapes().catch(() => {})
+    loadShapes().catch(() => {}),
+    loadCurveCuriosities().catch(() => {})
   ]).then(() => {
     applyTableFilter();
     highlightActiveRow();
@@ -2790,6 +2928,8 @@ function bindControls() {
         $(t).setAttribute("aria-selected", String(t === tabId));
         $(b).hidden = t !== tabId;
       }
+      // the Курьёзы tab hosts two tables: sequence + curve curiosities
+      $("curveCurioTable").hidden = tabId !== "tabCurio";
       $("resultsMeta").textContent = RESULT_META[metaKey];
       // reset the text search, but keep the dropdown filter
       $("tableSearch").value = "";

@@ -368,6 +368,14 @@ body {
 
 .btn:hover { background: var(--active); border-color: #4a4a52; }
 
+/* toggle buttons (eraser, smoothing): accent fill while on */
+.btn[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14141c;
+  font-weight: 600;
+}
+
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-primary {

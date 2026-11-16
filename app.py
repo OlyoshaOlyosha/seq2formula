@@ -55,10 +55,16 @@ HISTORY_FILE = DATA_DIR / "history.json"
 CURIOSITY_FILE = DATA_DIR / "curiosities.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 CURVES_FILE = DATA_DIR / "curves.json"
+CURVE_CURIOSITY_FILE = DATA_DIR / "curve_curiosities.json"
 HISTORY_CAP = 500        # solved runs kept in the file
 CURIOSITY_CAP = 60       # gallery entries kept across all runs
 CURIOSITY_PER_RUN = 4    # best entries saved from one run
 CURVES_CAP = 100         # finished curve runs kept in the file
+CURVE_CURIOSITY_CAP = 40  # near-miss curve drawings kept in the gallery
+# a curve curiosity = a finished unsolved run whose best pair still came
+# visibly close (two-sided distance in [0.2%, 10%]) — the funny
+# "almost circled it with a polygon" band worth keeping
+CURVE_CURIOSITY_MIN, CURVE_CURIOSITY_MAX = 0.002, 0.10
 
 MIN_TERMS, MAX_TERMS = 2, 32
 TERM_ABS_LIMIT = 1e9
@@ -682,6 +688,19 @@ class RunManager:
             curves = _load_json(CURVES_FILE, [])
             curves.append(entry)
             _save_json(CURVES_FILE, curves[-CURVES_CAP:])
+            # near-miss runs join the curve-curiosities gallery, deduped by
+            # formula texts so a repeated attempt doesn't fill it with clones
+            err = entry.get("error")
+            if err is not None and CURVE_CURIOSITY_MIN <= err <= CURVE_CURIOSITY_MAX:
+                curios = _load_json(CURVE_CURIOSITY_FILE, [])
+                key = (tuple(entry.get("x_text") or ()),
+                       tuple(entry.get("y_text") or ()))
+                if not any((tuple(c.get("x_text") or ()),
+                            tuple(c.get("y_text") or ())) == key
+                           for c in curios):
+                    curios.append(entry)
+                    _save_json(CURVE_CURIOSITY_FILE,
+                               curios[-CURVE_CURIOSITY_CAP:])
         elif not solved:
             self._save_custom_best()
         if solved and self.mode in ("sequence", "neuro"):
@@ -934,6 +953,12 @@ def get_curiosities() -> dict:
 @app.get("/api/curves")
 def get_curves() -> dict:
     return {"curves": list(reversed(_load_json(CURVES_FILE, [])))[:CURVES_CAP]}
+
+
+@app.get("/api/curve_curiosities")
+def get_curve_curiosities() -> dict:
+    return {"curiosities": list(reversed(_load_json(CURVE_CURIOSITY_FILE, [])))
+            [:CURVE_CURIOSITY_CAP]}
 
 
 @app.get("/api/settings")
