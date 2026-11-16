@@ -44,7 +44,11 @@ DEFAULT_CONSTS = (
     -5.0, -4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0,
     7.0, 8.0, 9.0, 10.0, 0.5, 1.5, 100.0,
 )
-EXP_BASE_CONSTS = (-3.0, -2.0, -1.0, 2.0, 3.0)  # exponent / base for ^ forms
+# Exponent / base for ^ forms: small bases cover 2^n / 3^n, 4-5-10 and the
+# fractions cover the rest of the T2 library (5^n, 0.5^n = 2^-n) — without
+# them those puzzles are literally unreachable.
+EXP_BASE_CONSTS = (-5.0, -3.0, -2.0, -1.0, 0.5, 1.5, 2.0, 3.0, 4.0, 5.0,
+                   10.0)
 POW_NK, POW_KN = "^nk", "^kn"
 NEG_TOKEN = "neg"  # noqa: S105  (grammar token, not a credential)
 
@@ -207,17 +211,26 @@ class NeuroEngine:
         self.best_ever: Best | None = None
         self.baseline = 0.0
         self.stagnation = 0  # generations since the last new best fitness
+        self._mask_cache = {}  # (budget, const_only) -> legal-token mask
+        self._sv_cache = {}    # (budget, slot, last_id) -> state vector
 
     # ---- episode generation (policy rollout) ----
 
     def _legal_mask(self, budget: int, const_only: bool) -> np.ndarray:
+        # masks depend only on (budget, const_only) — hot path, cached
+        key = (budget, const_only)
+        cached = self._mask_cache.get(key)
+        if cached is not None:
+            return cached
         mask = np.zeros(len(self.vocab))
         if const_only:  # the exponent/base decision of a ^ form
             for i in self.exp_ids:
                 mask[i] = 1.0
+            self._mask_cache[key] = mask
             return mask
         if budget <= 1:  # no room for another internal node: terminal only
             mask[:len(self.terminal_tokens)] = 1.0
+            self._mask_cache[key] = mask
             return mask
         mask[:len(self.terminal_tokens)] = 1.0
         for op in self.op_tokens:
@@ -229,16 +242,25 @@ class NeuroEngine:
             if "^" in self.cfg.allowed_ops:
                 mask[self.tok_id[POW_NK]] = 1.0
                 mask[self.tok_id[POW_KN]] = 1.0
+        self._mask_cache[key] = mask
         return mask
 
     def _state_vec(self, budget: int, slot: int, last_id: int) -> np.ndarray:
+        # the state layout is deterministic per (budget, slot, last_id) —
+        # hot path, cached (read-only consumers, sharing is safe)
+        key = (budget, slot, last_id)
+        cached = self._sv_cache.get(key)
+        if cached is not None:
+            return cached
         depth_oh = np.zeros(self.cfg.max_depth + 1)
         depth_oh[min(budget, self.cfg.max_depth)] = 1.0
         slot_oh = np.zeros(5)
         slot_oh[slot] = 1.0
         last_oh = np.zeros(len(self.vocab))
         last_oh[last_id] = 1.0
-        return np.concatenate([self.puzzle_feats, depth_oh, slot_oh, last_oh])
+        vec = np.concatenate([self.puzzle_feats, depth_oh, slot_oh, last_oh])
+        self._sv_cache[key] = vec
+        return vec
 
     def _rollout_slot(self, budget: int, slot: int, trace: list,
                       last_id: int) -> Node:
