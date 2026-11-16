@@ -35,6 +35,7 @@ import numpy as np
 
 from .fitness import INVALID_FITNESS, Score, score_candidate
 from .gp import Best, GenerationResult
+from .grammar import EXP_RANGE, random_path, replace_subtree, subtree_at
 from .nodes import BinOp, Const, Neg, Node, UnOp, Var
 
 # Vocabulary: constants get their own tokens (the network must learn WHICH
@@ -51,6 +52,39 @@ EXP_BASE_CONSTS = (-5.0, -3.0, -2.0, -1.0, 0.5, 1.5, 2.0, 3.0, 4.0, 5.0,
                    10.0)
 POW_NK, POW_KN = "^nk", "^kn"
 NEG_TOKEN = "neg"  # noqa: S105  (grammar token, not a credential)
+
+# Memetic const nudges: the moves a hill-climb actually needs — fix an
+# off-by-one constant, snap a half, adjust a coefficient by one.
+MEMETIC_DELTAS = (-2.0, -1.0, -0.5, 0.5, 1.0, 2.0)
+
+
+def _mutated_neighbor(tree: Node, rng: random.Random,
+                      ops: tuple[str, ...],
+                      funcs: tuple[str, ...]) -> Node | None:
+    """One small algebraic mutation of a formula: nudge a constant,
+    swap an operator/function, or drop a wrapper. Returns None when the
+    picked spot has no meaningful local move (a bare Var)."""
+    path = random_path(rng, tree)
+    target = subtree_at(tree, path)
+    if isinstance(target, Const):
+        new: Node = Const(target.value + rng.choice(MEMETIC_DELTAS))
+    elif isinstance(target, BinOp):
+        others = [o for o in ops if o != target.op]
+        if not others:
+            return None
+        op = rng.choice(others)
+        left, right = target.left, target.right
+        if op == "^" and not isinstance(left, Const) \
+                and not isinstance(right, Const):
+            right = Const(float(rng.randint(*EXP_RANGE)))
+        new = BinOp(op, left, right)
+    elif isinstance(target, UnOp):
+        new = UnOp(rng.choice(funcs), target.child) if funcs else target.child
+    elif isinstance(target, Neg):
+        new = target.child
+    else:  # Var: nothing to tweak locally
+        return None
+    return replace_subtree(tree, path, new)
 
 # Slot kinds fed to the policy (one-hot): root of the tree, left/right
 # operand of a binary op, argument of a unary function or neg, and the
@@ -111,6 +145,13 @@ class NeuroConfig:
     allowed_consts: tuple[float, ...] = DEFAULT_CONSTS
     parsimony: float = 0.001
     max_generations: int = 1000
+    # Memetic refinement: algebraically tweak the top formulas after each
+    # rollout batch (one constant nudge / operator swap / wrapper strip).
+    # Sampling finds the skeleton (2n-2); a local const move finishes it
+    # (2n-1) — the composite T2 family's bottleneck.
+    memetic: bool = True
+    memetic_top: int = 4      # parents refined per generation
+    memetic_tries: int = 16   # neighbor draws per parent
 
 
 class _Policy:
@@ -427,10 +468,45 @@ class NeuroEngine:
             scored.append((node, score_candidate(node, self.seq,
                                                  self.cfg.parsimony)))
             traces.append(trace)
-        stats = self._update(traces, [self._reward(sc) for _, sc in scored],
+        # Memetic pass BEFORE the policy update: refine the top formulas
+        # with local algebraic moves. When a neighbor beats its parent,
+        # the parent's trace reward is raised to the neighbor's — the
+        # tokens that produced the near-miss skeleton get extra pull,
+        # which is exactly the signal plain CEM is too slow to amplify.
+        memetic_children: list[tuple[Node, Score]] = []
+        memetic_hits = 0
+        rewards = [self._reward(sc) for _, sc in scored]
+        if self.cfg.memetic:
+            ranked = [(i, n, sc) for i, (n, sc) in enumerate(scored)
+                      if sc.fitness != INVALID_FITNESS]
+            ranked.sort(key=lambda t: t[2].fitness, reverse=True)
+            for _, parent, psc in ranked[:self.cfg.memetic_top]:
+                best: tuple[Node, Score] | None = None
+                for _ in range(self.cfg.memetic_tries):
+                    nb = _mutated_neighbor(parent, self.rng,
+                                           self.cfg.allowed_ops,
+                                           self.cfg.allowed_funcs)
+                    if nb is None:
+                        continue
+                    nsc = score_candidate(nb, self.seq, self.cfg.parsimony)
+                    if (nsc.fitness != INVALID_FITNESS
+                            and nsc.fitness > psc.fitness
+                            and (best is None or nsc.fitness > best[1].fitness)):
+                        best = (nb, nsc)
+                if best is not None:
+                    memetic_hits += 1
+                    memetic_children.append(best)
+                    # reinforce the parent's trace: raise its reward to
+                    # the refined child's (never lower it)
+                    p_idx = next(i for i, (n, _) in enumerate(scored)
+                                 if n == parent)
+                    rewards[p_idx] = max(rewards[p_idx], self._reward(best[1]))
+        stats = self._update(traces, rewards,
                              [tuple(round(v, 6) for v in sc.values)
                               if sc.values is not None else None
                               for _, sc in scored])
+        stats["memetic_hits"] = memetic_hits
+        scored.extend(memetic_children)
 
         valid = [s for s in scored if s[1].fitness != INVALID_FITNESS]
         valid.sort(key=lambda s: s[1].fitness, reverse=True)
