@@ -963,7 +963,8 @@ def get_curves() -> dict:
 @app.get("/api/curve_curiosities")
 def get_curve_curiosities() -> dict:
     return {"curiosities": list(reversed(_load_json(CURVE_CURIOSITY_FILE, [])))
-            [:CURVE_CURIOSITY_CAP]}
+            [:CURVE_CURIOSITY_CAP],
+            "threshold": {"min": CURVE_CURIOSITY_MIN, "max": CURVE_CURIOSITY_MAX}}
 
 
 class DrawingRequest(BaseModel):

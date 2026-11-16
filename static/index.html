@@ -156,7 +156,9 @@
       <div class="live-grid" id="liveGrid" hidden>
         <div class="formula-hero">
           <div class="hero-main">
-            <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span></div>
+            <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span>
+              <button class="btn" id="evoBtn" hidden title="Показать, как менялась лучшая формула от поколения к поколению">Проиграть эволюцию</button>
+            </div>
             <div class="hero-formula" id="bestFormula" aria-live="polite"
                  role="button" tabindex="0"
                  title="Копировать формулу"></div>
@@ -258,6 +260,8 @@
           <button class="btn" id="curveSaveBtn" title="Сохранить текущий рисунок на сервер">Сохранить</button>
           <button class="btn" id="curveDelBtn" disabled
                   title="Удалить выбранный рисунок с сервера">Удалить</button>
+          <button class="btn" id="curveExportBtn" disabled
+                  title="Скачать все сохранённые рисунки одним JSON-файлом">Экспорт</button>
         </div>
         <div class="curve-canvas-wrap">
           <canvas id="curveCanvas" width="800" height="800"
@@ -274,6 +278,8 @@
               Стоп
             </button>
             <button class="btn" id="curveUndoBtn" disabled title="Убрать последний штрих">Отменить штрих</button>
+            <button class="btn" id="curvePlayBtn" disabled
+                    title="Проиграть найденную кривую: линии рисуются так, будто их ведёт перо">Проиграть</button>
             <button class="btn" id="curveEraseBtn" aria-pressed="false"
                     title="Ластик: зажмите и ведите по холсту — точки рисунка рядом с курсором стираются">Ластик</button>
             <button class="btn" id="curveClearBtn">Очистить</button>
@@ -476,6 +482,7 @@
           <tbody id="curioRows"></tbody>
         </table>
         <table class="list-table" id="curveCurioTable" hidden>
+          <caption class="field-hint" id="curveCurioCaption"></caption>
           <thead><tr><th>Фигура</th><th>Кривые</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
           <tbody id="curveCurioRows"></tbody>
         </table>

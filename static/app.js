@@ -47,6 +47,10 @@ const state = {
   lastCurveTopUpdate: 0,   // throttle the curve top list
   wasCurveShocking: false, // dedupe shock entries in the curve race log
   lastCurveLogGen: null,   // throttle "new best" entries
+  champions: [],           // sequence-mode best-formula history for the evolution playback
+  evoPlaying: false,       // evolution playback in progress
+  evoTimer: null,          // playback stepper handle
+  curvePlayRaf: null,      // curve playback animation handle
 };
 
 /* ---------- formatting ---------- */
@@ -365,6 +369,9 @@ function resetBuffers() {
     sizesX: [], sizesY: [],
   };
   state.lastFormulaText = "";
+  state.champions = [];
+  stopEvolutionPlayback(true);
+  updateEvoBtn();
   state.genTimestamps = [];
   state.raceLog = [];
   state.lastExactSize = Infinity;
@@ -490,6 +497,12 @@ function applyGen(msg) {
   if (msg.best.text !== state.lastFormulaText) {
     state.lastFormulaText = msg.best.text;
     renderKatex($("bestFormula"), astToLatex(msg.best.ast), true);
+    // remember each distinct champion for the evolution playback
+    state.champions.push({
+      gen: msg.gen + 1, text: msg.best.text, ast: msg.best.ast,
+      values: msg.best.values, error: msg.best.error,
+    });
+    updateEvoBtn();
   }
   const sub = [];
   sub.push(`fitness ${fmtNum(msg.best.fitness)}`);
@@ -535,6 +548,61 @@ function updateHeroChart(values) {
   const chart = state.charts.hero;
   if (!seq || !seq.length || !chart) return;
   chart.setData(prepPlotData(seq, values));
+}
+
+/* Evolution playback: step through every distinct champion formula the
+   run has produced, one per step, redrawing the hero chart and formula.
+   Long unchanged stretches are already deduped — only text changes are
+   recorded. Click again (or start a new run) to stop. */
+function updateEvoBtn() {
+  const btn = $("evoBtn");
+  btn.hidden = state.champions.length < 2;
+  btn.textContent = state.evoPlaying ? "Остановить"
+    : `Эволюция (${state.champions.length})`;
+}
+
+function stopEvolutionPlayback(silent) {
+  if (state.evoTimer) {
+    clearInterval(state.evoTimer);
+    state.evoTimer = null;
+  }
+  const wasPlaying = state.evoPlaying;
+  state.evoPlaying = false;
+  if (wasPlaying && !silent) restoreFinalChampion();
+  updateEvoBtn();
+}
+
+function restoreFinalChampion() {
+  const last = state.champions[state.champions.length - 1];
+  if (!last) return;
+  renderKatex($("bestFormula"), astToLatex(last.ast), true);
+  updateHeroChart(last.values);
+  $("heroLabel").textContent = "Лучшая формула";
+}
+
+function playEvolution() {
+  if (state.evoPlaying) {
+    stopEvolutionPlayback(false);
+    return;
+  }
+  const champs = state.champions;
+  if (champs.length < 2) return;
+  state.evoPlaying = true;
+  updateEvoBtn();
+  let i = 0;
+  const step = () => {
+    if (!state.evoPlaying) return;
+    const ch = champs[i];
+    renderKatex($("bestFormula"), astToLatex(ch.ast), true);
+    updateHeroChart(ch.values);
+    $("heroLabel").textContent =
+      `Эволюция ${i + 1}/${champs.length} · пок. ${ch.gen}`
+      + (ch.error === null || ch.error === undefined ? "" : ` · ${fmtPercent(ch.error)}`);
+    i += 1;
+    if (i >= champs.length) stopEvolutionPlayback(false);
+  };
+  step();
+  state.evoTimer = setInterval(step, 700);
 }
 
 /* ---------- hover plot previews (history / hall / curiosities) ---------- */
@@ -1112,6 +1180,7 @@ async function loadSavedDrawings() {
     sel.appendChild(opt);
   }
   $("curveDelBtn").disabled = !data.drawings.length;
+  $("curveExportBtn").disabled = !data.drawings.length;
 }
 
 function wireSavedDrawings() {
@@ -1288,7 +1357,7 @@ function initCurveCanvas() {
   }
 }
 
-function drawCurveCanvas() {
+function drawCurveCanvas(progress = 1) {
   const canvas = $("curveCanvas");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -1340,20 +1409,46 @@ function drawCurveCanvas() {
     ctx.setLineDash([]);
   }
 
-  // best curve per stroke (parametric polylines over 64 samples)
+  // best curve per stroke (parametric polylines over 64 samples);
+  // progress < 1 draws only the first fraction of each polyline
   const curves = state.curveBestCurves;
+  const playBtn = $("curvePlayBtn");
+  if (playBtn) playBtn.disabled = !(curves && curves.length);
   if (curves && curves.length) {
     ctx.strokeStyle = state.curveSolved ? CHART_COLORS.positive : CHART_COLORS.accent;
     ctx.lineWidth = 3;
     ctx.lineJoin = "round";
+    const nPts = Math.max(2, Math.ceil(curves[0].xs.length * progress));
     for (const c of curves) {
       if (!c || !c.xs || !c.xs.length) continue;
       ctx.beginPath();
       ctx.moveTo(c.xs[0] * W, c.ys[0] * H);
-      for (let i = 1; i < c.xs.length; i++) ctx.lineTo(c.xs[i] * W, c.ys[i] * H);
+      const n = Math.min(nPts, c.xs.length);
+      for (let i = 1; i < n; i++) ctx.lineTo(c.xs[i] * W, c.ys[i] * H);
       ctx.stroke();
     }
   }
+}
+
+/* Curve playback: animate the best-fit polylines as if a pen were
+   drawing them, ~2.5 s per pass. Any redraw with progress 1 cancels it. */
+function playCurveFit() {
+  if (state.curvePlayRaf) {
+    cancelAnimationFrame(state.curvePlayRaf);
+    state.curvePlayRaf = null;
+  }
+  const dur = 2500;
+  const t0 = performance.now();
+  const frame = (t) => {
+    const p = Math.min(1, (t - t0) / dur);
+    drawCurveCanvas(0.5 - 0.5 * Math.cos(Math.PI * p)); // ease in-out
+    if (p < 1) {
+      state.curvePlayRaf = requestAnimationFrame(frame);
+    } else {
+      state.curvePlayRaf = null;
+    }
+  };
+  state.curvePlayRaf = requestAnimationFrame(frame);
 }
 
 function applyCurveGen(msg) {
@@ -1588,6 +1683,7 @@ function renderCurveCheck(best) {
 }
 
 function scheduleCurveUpdate() {
+  cancelCurvePlayback();
   if (state.curveRafPending) return;
   state.curveRafPending = true;
   requestAnimationFrame(() => {
@@ -1609,6 +1705,15 @@ function scheduleCurveUpdate() {
     }
     drawCurveCanvas();
   });
+}
+
+/* a live generation redraws the canvas — cancel a running playback so
+   the two rAF loops do not fight over the same frame */
+function cancelCurvePlayback() {
+  if (state.curvePlayRaf) {
+    cancelAnimationFrame(state.curvePlayRaf);
+    state.curvePlayRaf = null;
+  }
 }
 
 function applyCurveSolved(msg) {
@@ -2379,6 +2484,11 @@ async function loadShapes() {
    the curve canvas, like the shapes table. */
 async function loadCurveCuriosities() {
   const data = await api("/api/curve_curiosities");
+  if (data.threshold) {
+    $("curveCurioCaption").textContent =
+      "Галерея почти-попаданий: ошибка между "
+      + fmtPercent(data.threshold.min) + " и " + fmtPercent(data.threshold.max);
+  }
   const rows = $("curveCurioRows");
   rows.innerHTML = "";
   if (!data.curiosities.length) {
@@ -2965,6 +3075,30 @@ function bindControls() {
     state.curvePreset = null;
     drawCurveCanvas();
     syncCurveUI();
+  });
+  $("curvePlayBtn").addEventListener("click", () => {
+    if (!state.curveBestCurves || !state.curveBestCurves.length) return;
+    playCurveFit();
+  });
+  $("evoBtn").addEventListener("click", playEvolution);
+  $("curveExportBtn").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/drawings");
+      if (!data.drawings.length) {
+        alertErr("сохранённых рисунков пока нет");
+        return;
+      }
+      const blob = new Blob([JSON.stringify(data.drawings, null, 2)],
+        { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `seq2formula_drawings_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alertErr("не удалось скачать рисунки: " + err.message);
+    }
   });
   $("curveSeedInput").addEventListener("input", (e) => {
     const cleaned = e.target.value.replace(/\D/g, "");
