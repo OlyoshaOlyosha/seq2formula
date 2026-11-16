@@ -245,3 +245,16 @@ def test_all_functions_never_crash_engine():
                             allowed_ops=BINARY_OPS))
     for _ in range(15):
         eng.step()
+
+
+def test_floor_function_evaluates_and_serializes():
+    # floor is the piecewise-linear building block (triangle waves via
+    # floor(abs(...))): values, text, JSON round-trip.
+    from engine.evaluator import evaluate_all
+    from engine.nodes import BinOp, Const, UnOp, Var, from_dict, to_dict, to_text
+
+    tree = UnOp("floor", BinOp("*", Var(), Const(1.5)))
+    vals = evaluate_all(tree, 4)
+    assert vals == [1.0, 3.0, 4.0, 6.0]
+    assert to_text(tree) == "floor(n * 1.5)"
+    assert from_dict(to_dict(tree)) == tree

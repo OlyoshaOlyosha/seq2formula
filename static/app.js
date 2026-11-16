@@ -123,6 +123,7 @@ function astToLatex(ast) {
       case "sqrt": return `\\sqrt{${inner}}`;
       case "cbrt": return `\\sqrt[3]{${inner}}`;
       case "abs": return `\\left|${inner}\\right|`;
+      case "floor": return `\\left\\lfloor${inner}\\right\\rfloor`;
       case "fact": {
         // postfix ! binds tightest: parens unless the argument is a bare
         // variable, a non-negative constant, or an already-parenthesized
@@ -2088,7 +2089,7 @@ function updatePuzzleLabel() {
 
 const TOKEN_LABELS = {
   "+": "+", "-": "−", "*": "×", "/": "÷", "^": "xʸ", mod: "%",
-  sqrt: "√", cbrt: "∛", fact: "!", abs: "|x|",
+  sqrt: "√", cbrt: "∛", fact: "!", abs: "|x|", floor: "⌊x⌋",
   sin: "sin", cos: "cos", tan: "tan", ln: "ln", pi: "π", e: "e",
 };
 

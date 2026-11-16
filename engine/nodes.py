@@ -18,7 +18,7 @@ _MAX_JSON_DEPTH = 64
 # Grammar v2 unary functions (UnOp nodes). The evaluator holds the
 # callables, the grammar draws them, this list is the shared source of
 # names — including the JSON tag validation.
-UNARY_FUNCS = ("sqrt", "cbrt", "fact", "abs", "sin", "cos", "tan", "ln")
+UNARY_FUNCS = ("sqrt", "cbrt", "fact", "abs", "floor", "sin", "cos", "tan", "ln")
 
 # Special constants drawn from the terminal pool when enabled ("pi",
 # "e" picker tokens). Stored as plain Const values — they participate

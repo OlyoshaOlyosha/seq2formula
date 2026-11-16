@@ -41,6 +41,7 @@ UNARY_EVAL = {
     "cbrt": _cbrt,
     "fact": _fact,
     "abs": abs,
+    "floor": math.floor,     # piecewise-linear building block (triangle waves)
     "sin": math.sin,
     "cos": math.cos,
     "tan": math.tan,         # finite but huge near poles; BIG filters
