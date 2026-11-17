@@ -36,7 +36,7 @@ import numpy as np
 from .fitness import INVALID_FITNESS, Score, score_candidate
 from .gp import Best, GenerationResult
 from .grammar import EXP_RANGE, random_path, replace_subtree, subtree_at
-from .nodes import CMP_OPS, BinOp, Const, If, Neg, Node, UnOp, Var
+from .nodes import CMP_OPS, BinOp, Const, If, Neg, Node, UnOp, Var, special_value
 
 # Vocabulary: constants get their own tokens (the network must learn WHICH
 # number fits the puzzle — 2 for 2 4 8, bias 5 for 6 7 8), so the token set
@@ -66,15 +66,25 @@ MEMETIC_DELTAS = (-2.0, -1.0, -0.5, 0.5, 1.0, 2.0)
 # Improvements-only keeps the move harmless elsewhere.
 MEMETIC_WRAP_P = 0.25
 
+# Share of memetic tries spent on the VAR-SUBSTITUTION move: replace n
+# with c1*n+c2 somewhere in the tree. Many composite puzzles are the
+# same simple formula over a TRANSFORMED index — n^2 becomes (2n-1)^2
+# (exact, in one move) when the Var inside is re-substituted. Constant
+# nudges and op swaps can never express this jump: it changes the
+# variable, not a number. Improvements-only, like every memetic move.
+VAR_SUBST_P = 0.2
+VAR_SUBST_MULTS = (2.0, 3.0, 4.0, 0.5, 1.5)
+VAR_SUBST_OFFSETS = (0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0)
+
 
 def _mutated_neighbor(tree: Node, rng: random.Random,
                       ops: tuple[str, ...],
                       funcs: tuple[str, ...]) -> Node | None:
     """One small algebraic mutation of a formula: nudge a constant,
-    swap an operator/function, drop a wrapper, or (MEMETIC_WRAP_P of
-    tries) add/subtract a small constant term to the whole formula.
-    Returns None when the picked spot has no meaningful local move (a
-    bare Var)."""
+    swap an operator/function, drop a wrapper, (MEMETIC_WRAP_P of tries)
+    add/subtract a small constant term to the whole formula, or
+    (VAR_SUBST_P of tries) re-substitute n -> c1*n+c2. Returns None when
+    the picked spot has no meaningful local move (a bare Var)."""
     if rng.random() < MEMETIC_WRAP_P:
         delta = rng.choice(MEMETIC_DELTAS)
         if rng.random() < 0.5:
@@ -82,6 +92,13 @@ def _mutated_neighbor(tree: Node, rng: random.Random,
         return BinOp("-", tree, Const(delta))
     path = random_path(rng, tree)
     target = subtree_at(tree, path)
+    if rng.random() < VAR_SUBST_P and isinstance(target, Var):
+        mult = rng.choice(VAR_SUBST_MULTS)
+        off = rng.choice(VAR_SUBST_OFFSETS)
+        # c1 != 1 by construction, so this is never the identity move
+        return replace_subtree(
+            tree, path,
+            BinOp("+", BinOp("*", Const(mult), Var()), Const(off)))
     if isinstance(target, Const):
         new: Node = Const(target.value + rng.choice(MEMETIC_DELTAS))
     elif isinstance(target, BinOp):
@@ -147,6 +164,21 @@ SOFT_EPS = 0.1
 # 0.995 vs 0.828) and the policy snaps to it wholesale next update.
 ELITE_FRAC = 0.25
 
+# Progressive grammar: the policy network is built FULL-WIDTH for the
+# whole enabled grammar, but non-base token groups stay masked (zero
+# probability) until the run earns them. Measured motivation: the full
+# server grammar helps func-heavy tiers (T4 20% -> 69%) but DILUTES the
+# others (T3 64% -> 36%, T5 42% -> 33%) — every extra token pays tax on
+# each of the ~1100 decisions per generation. Widening on stagnation
+# gives each puzzle the smallest alphabet it needs: T1/T2-style puzzles
+# never widen, func puzzles unlock sqrt/fact after a stall, wave/parity
+# puzzles get pi/e/if last. Unlocking is just a mask switch (no policy
+# resize); new tokens enter through the SOFT_EPS uniform mix immediately.
+# Group order: funcs first (T4's measured +49pp), piecewise + specials
+# second (needed by parity/wave/e, the rarest families).
+STAGE_BASE, STAGE_FUNCS, STAGE_PIECE = range(3)
+WIDEN_WINDOW = 40  # stagnant generations before the next group unlocks
+
 # Reward shaping via first differences: CEM/REINFORCE need a gradient path
 # to follow, but some landscapes are deceptive — for 2n-1 the intermediate
 # 2n scores WORSE than the attractor 1.5n under the plain error metric.
@@ -183,6 +215,12 @@ class NeuroConfig:
     memetic: bool = True
     memetic_top: int = 4      # parents refined per generation
     memetic_tries: int = 16   # neighbor draws per parent
+    # Progressive grammar: start with the base group (var, consts,
+    # + - * / ^ mod, neg, ^-forms) and unlock funcs, then piecewise +
+    # specials, after WIDEN_WINDOW stagnant generations. No-op when the
+    # config enables only base tokens (nothing to widen).
+    progressive: bool = True
+    widen_window: int = WIDEN_WINDOW
 
 
 class _Policy:
@@ -268,6 +306,34 @@ class NeuroEngine:
         self.exp_ids = [self.tok_id[f"c{c:g}"] for c in EXP_BASE_CONSTS
                         if f"c{c:g}" in self.tok_id]
 
+        # Progressive grammar: per-token unlock stage. Base = terminals,
+        # arithmetic ops, neg, the ^-forms; stage 1 adds unary functions,
+        # stage 2 adds the piecewise fork + specials (pi/e). When the
+        # config enables only base tokens there is nothing to widen and
+        # the stage stays 0 forever (bench-minimal behavior unchanged).
+        specials = {v for v in (special_value(t) for t in ("pi", "e"))
+                    if v is not None}
+        self._tok_stage: dict[int, int] = {}
+        for tok in self.vocab:
+            if tok in self.funcs:
+                self._tok_stage[self.tok_id[tok]] = STAGE_FUNCS
+            elif tok == IF_TOKEN or tok in CMP_OPS:
+                self._tok_stage[self.tok_id[tok]] = STAGE_PIECE
+            elif tok.startswith("c") \
+                    and any(float(tok[1:]) == s for s in specials):
+                self._tok_stage[self.tok_id[tok]] = STAGE_PIECE
+            else:
+                self._tok_stage[self.tok_id[tok]] = STAGE_BASE
+        self.max_stage = max(self._tok_stage.values())
+        self.progressive = self.cfg.progressive and self.max_stage > STAGE_BASE
+        self.stage = STAGE_BASE
+        self.widen_stag = 0  # stagnant generations since the last widen
+        # memetic moves must not smuggle locked grammar in: the op/func
+        # swap pools follow the current stage ("^" has no token of its
+        # own — it rides on the base ^nk/^kn tokens, so always enabled)
+        self._enabled_ops = self._stage_ops()
+        self._enabled_funcs = self._stage_funcs()
+
         # Puzzle features are constant across the run: length, the first
         # terms and their first differences, all normalized by the max
         # magnitude. A constant difference IS the linear rule (2n-1 ->
@@ -305,9 +371,22 @@ class NeuroEngine:
 
     # ---- episode generation (policy rollout) ----
 
-    def _legal_mask(self, budget: int, mode: int = MASK_NORMAL) -> np.ndarray:
-        # masks depend only on (budget, mode) — hot path, cached
-        key = (budget, mode)
+    def _stage_ops(self) -> tuple[str, ...]:
+        """Ops unlocked at the current stage (memetic swap pool)."""
+        return tuple(o for o in self.cfg.allowed_ops
+                     if o not in self.tok_id  # "^": base ^-forms only
+                     or self._tok_stage[self.tok_id[o]] <= self.stage)
+
+    def _stage_funcs(self) -> tuple[str, ...]:
+        """Unary functions unlocked at the current stage."""
+        return tuple(f for f in self.funcs
+                     if self._tok_stage[self.tok_id[f]] <= self.stage)
+
+    def _legal_mask(self, budget: int, mode: int = MASK_NORMAL,
+                    stage: int = STAGE_BASE) -> np.ndarray:
+        # masks depend only on (budget, mode, stage) — hot path, cached;
+        # the stage gates lock not-yet-unlocked grammar groups to zero
+        key = (budget, mode, stage)
         cached = self._mask_cache.get(key)
         if cached is not None:
             return cached
@@ -315,32 +394,30 @@ class NeuroEngine:
         if mode == MASK_POW:  # the exponent/base decision of a ^ form
             for i in self.exp_ids:
                 mask[i] = 1.0
-            self._mask_cache[key] = mask
-            return mask
-        if mode == MASK_CMP:  # the comparison choice of an if-cond
+        elif mode == MASK_CMP:  # the comparison choice of an if-cond
             for op in CMP_OPS:
                 if op in self.tok_id:
                     mask[self.tok_id[op]] = 1.0
-            self._mask_cache[key] = mask
-            return mask
-        if budget <= 1:  # no room for another internal node: terminal only
+        elif budget <= 1:  # no room for another internal node: terminal only
             mask[:len(self.terminal_tokens)] = 1.0
-            self._mask_cache[key] = mask
-            return mask
-        mask[:len(self.terminal_tokens)] = 1.0
-        for op in self.op_tokens:
-            mask[self.tok_id[op]] = 1.0
-        if budget >= 2:
-            for f in self.funcs:
-                mask[self.tok_id[f]] = 1.0
-            mask[self.tok_id[NEG_TOKEN]] = 1.0
-            if "^" in self.cfg.allowed_ops:
-                mask[self.tok_id[POW_NK]] = 1.0
-                mask[self.tok_id[POW_KN]] = 1.0
-            if self.if_enabled:
-                # fork at budget 2: cond children and both branches all
-                # resolve to terminals — the shallowest legal piecewise
-                mask[self.tok_id[IF_TOKEN]] = 1.0
+        else:
+            mask[:len(self.terminal_tokens)] = 1.0
+            for op in self.op_tokens:
+                mask[self.tok_id[op]] = 1.0
+            if budget >= 2:
+                for f in self.funcs:
+                    mask[self.tok_id[f]] = 1.0
+                mask[self.tok_id[NEG_TOKEN]] = 1.0
+                if "^" in self.cfg.allowed_ops:
+                    mask[self.tok_id[POW_NK]] = 1.0
+                    mask[self.tok_id[POW_KN]] = 1.0
+                if self.if_enabled:
+                    # fork at budget 2: cond children and both branches all
+                    # resolve to terminals — the shallowest legal piecewise
+                    mask[self.tok_id[IF_TOKEN]] = 1.0
+        for i, tok_stage in self._tok_stage.items():
+            if tok_stage > stage:
+                mask[i] = 0.0
         self._mask_cache[key] = mask
         return mask
 
@@ -409,13 +486,13 @@ class NeuroEngine:
         constant within a generation, so it is computed once per context
         (forward pass + mask + soft mixing) and cached; the sample itself
         is one rng draw plus a searchsorted over the cumulative probs."""
-        key = (budget, slot, last_id)
+        key = (budget, slot, last_id, self.stage)
         cached = self._prob_cache.get(key)
         if cached is None:
             mode = (MASK_CMP if slot == SLOT_CMP
                     else MASK_POW if slot == SLOT_POW else MASK_NORMAL)
             state = self._state_vec(budget, slot, last_id)
-            mask = self._legal_mask(budget, mode)
+            mask = self._legal_mask(budget, mode, self.stage)
             p, _ = self.policy.forward(state[None, :])
             probs = p[0] * mask
             total = probs.sum()
@@ -484,7 +561,8 @@ class NeuroEngine:
         slots = slots.argmax(axis=1)
         masks = np.stack([
             self._legal_mask(int(b), MASK_POW if s == SLOT_POW else
-                             (MASK_CMP if s == SLOT_CMP else MASK_NORMAL))
+                             (MASK_CMP if s == SLOT_CMP else MASK_NORMAL),
+                             self.stage)
             for b, s in zip(depths, slots, strict=True)])
         legal = masks.sum(axis=1, keepdims=True)
         p = (1 - SOFT_EPS) * p + SOFT_EPS * masks / legal
@@ -580,8 +658,8 @@ class NeuroEngine:
                 best: tuple[Node, Score] | None = None
                 for _ in range(self.cfg.memetic_tries):
                     nb = _mutated_neighbor(parent, self.rng,
-                                           self.cfg.allowed_ops,
-                                           self.cfg.allowed_funcs)
+                                           self._enabled_ops,
+                                           self._enabled_funcs)
                     if nb is None:
                         continue
                     nsc = score_candidate(nb, self.seq, self.cfg.parsimony)
@@ -638,6 +716,23 @@ class NeuroEngine:
             self.baseline = stats["reward"]
             self.stagnation = 0
         stats["shock"] = shock
+
+        # progressive grammar: unlock the next token group after a
+        # stretch of generations with no new best fitness. Independent
+        # of the shock counter on purpose — a weight shock must not
+        # delay an unlock (and vice versa). A run that keeps improving
+        # on the base alphabet never widens.
+        widened = False
+        if self.progressive and self.stage < self.max_stage:
+            self.widen_stag = 0 if new_best else self.widen_stag + 1
+            if self.widen_stag >= self.cfg.widen_window:
+                self.stage += 1
+                self.widen_stag = 0
+                widened = True
+                self._enabled_ops = self._stage_ops()
+                self._enabled_funcs = self._stage_funcs()
+        stats["stage"] = self.stage
+        stats["widened"] = widened
 
         # "what the network is thinking": marginal token distribution at
         # the root decision right now — the dashboard draws it as bars

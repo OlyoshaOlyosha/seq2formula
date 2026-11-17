@@ -197,7 +197,12 @@ def test_neuro_vocab_gets_if_token_with_comparisons():
                     allowed_ops=OPS_IF))
     assert IF_TOKEN in engine.vocab
     assert engine.if_enabled
-    cmp_mask = engine._legal_mask(3, mode=2)
+    # cmp ops are progressive-grammar stage 2: pass the final stage
+    cmp_mask = engine._legal_mask(3, mode=2,
+                                  stage=engine.max_stage)
+    legal = [engine.vocab[i] for i in range(len(engine.vocab))
+             if cmp_mask[i]]
+    assert sorted(legal) == sorted(CMP_OPS)
     legal = [engine.vocab[i] for i in range(len(engine.vocab))
              if cmp_mask[i]]
     assert sorted(legal) == sorted(CMP_OPS)

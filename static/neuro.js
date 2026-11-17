@@ -168,6 +168,11 @@ function tokLabel(tok) {
 function renderKpis(g) {
   const s = (g && g.stats) || {};
   $("kpiGen").textContent = g ? g.gen : 0;
+  // progressive grammar stage: 0 = base alphabet, 1 = +functions,
+  // 2 = +piecewise/specials (the full enabled grammar)
+  $("kpiStage").textContent =
+    s.stage === 1 ? "база + функции"
+    : s.stage === 2 ? "полная" : "база";
   $("kpiErr").textContent =
     (s.best_error != null)
       ? (s.best_error * 100).toFixed(2) + "%" : "—";

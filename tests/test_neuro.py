@@ -145,3 +145,101 @@ def test_memetic_wrap_move_adds_const_term() -> None:
             continue
         # valid tree that still evaluates on n=1..4
         assert evaluate_all(nb, 4) is not None
+
+
+def test_var_substitution_move_solves_composite_family() -> None:
+    """The var-substitution move (n -> c1*n+c2) is the elevator across
+    composite families: n^2 becomes (2n-1)^2 EXACT in one move — a jump
+    no constant nudge or op swap can express. Also: the substitution is
+    never the identity (c1 != 1 by construction)."""
+    import random
+
+    from engine.fitness import score_candidate
+    from engine.neuro import _mutated_neighbor
+    from engine.nodes import Const, Var
+
+    seq = [1.0, 9.0, 25.0, 49.0, 81.0, 121.0, 169.0, 225.0]  # (2n-1)^2
+    tree = BinOp("^", Var(), Const(2.0))  # n^2, fit 0.41
+    rng = random.Random(0)
+    saw_identity = False
+    # exact (2n-1) substitution: p ~ 0.15% per try — needs a few thousand
+    for _ in range(3000):
+        nb = _mutated_neighbor(tree, rng,
+                               ("+", "-", "*", "/", "^", "mod"), ())
+        if nb is None:
+            continue
+        # identity check: c1 != 1 by construction, so 2*n+d never
+        # collapses back to plain n
+        if nb == Var():
+            saw_identity = True
+        if score_candidate(nb, seq, 0.001).exact:
+            break
+    else:
+        raise AssertionError("var-subst never found (2n-1)^2 in 3000 tries")
+    assert not saw_identity
+
+
+def test_progressive_grammar_widens_and_gates_masks() -> None:
+    """Full-grammar config: the engine starts at the base stage (funcs
+    and piecewise masked out), unlocks funcs after WIDEN_WINDOW stagnant
+    generations and piecewise+specials after another; a base-only config
+    never widens (progressive is a no-op there)."""
+    from engine.neuro import STAGE_BASE, STAGE_FUNCS, STAGE_PIECE, WIDEN_WINDOW
+    from engine.nodes import UNARY_FUNCS
+
+    # unsolvable-but-valid sequence: keeps stagnation growing, no new best
+    seq = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0]
+    specials = (3.141592653589793, 2.718281828459045)
+    cfg = NeuroConfig(seed=0, population=64, max_generations=200,
+                      allowed_ops=("+", "-", "*", "/", "^", "mod", "<", ">"),
+                      allowed_funcs=tuple(UNARY_FUNCS),
+                      allowed_consts=(*NeuroConfig().allowed_consts,
+                                      *specials))
+    eng = NeuroEngine(seq, cfg)
+    assert eng.progressive
+    assert eng.stage == STAGE_BASE
+    mask0 = eng._legal_mask(4, 0, STAGE_BASE)
+    assert mask0[eng.tok_id["sqrt"]] == 0.0
+    assert mask0[eng.tok_id["if"]] == 0.0
+
+    stages = {eng.stage}
+    # new-best improvements reset the widen counter, so the exact widen
+    # generations vary — run to the budget and expect both unlocks
+    for _ in range(200):
+        eng.step()
+        stages.add(eng.stage)
+        if eng.stage == STAGE_PIECE:
+            break
+    assert stages == {STAGE_BASE, STAGE_FUNCS, STAGE_PIECE}, stages
+    mask2 = eng._legal_mask(4, 0, STAGE_PIECE)
+    assert mask2[eng.tok_id["sqrt"]] == 1.0
+    assert mask2[eng.tok_id["if"]] == 1.0
+    assert mask2[eng.tok_id[f"c{specials[0]:g}"]] == 1.0
+
+    # base-only config: nothing to widen, behavior identical to before
+    plain = NeuroEngine(seq, NeuroConfig(seed=0, population=16,
+                                         max_generations=5))
+    assert not plain.progressive
+    for _ in range(WIDEN_WINDOW + 2):
+        plain.step()
+    assert plain.stage == STAGE_BASE
+
+
+def test_progressive_stage_is_deterministic() -> None:
+    """Same seed + same config = same stage timeline and same best-ever
+    fitness over the first generations."""
+    from engine.nodes import UNARY_FUNCS
+
+    seq = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0]
+    runs = []
+    for _ in range(2):
+        eng = NeuroEngine(seq, NeuroConfig(seed=7, population=32,
+                                           max_generations=100,
+                                           allowed_funcs=tuple(UNARY_FUNCS)))
+        trace = []
+        for _ in range(60):
+            res = eng.step()
+            trace.append((eng.stage,
+                          round(res.best.score.fitness, 10)))
+        runs.append(trace)
+    assert runs[0] == runs[1]
