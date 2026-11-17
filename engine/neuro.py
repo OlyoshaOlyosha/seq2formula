@@ -291,6 +291,17 @@ class NeuroEngine:
         self.stagnation = 0  # generations since the last new best fitness
         self._mask_cache = {}  # (budget, const_only) -> legal-token mask
         self._sv_cache = {}    # (budget, slot, last_id) -> state vector
+        # (budget, slot, last_id) -> (state, cumulative probs). Weights are
+        # constant within one generation, and a rollout batch re-visits the
+        # same few dozen decision contexts hundreds of times — so the whole
+        # sampling distribution is computed once per context per generation
+        # and each sample is just one rng draw plus a searchsorted.
+        self._prob_cache = {}
+        # First differences of the target: constant across the run, needed
+        # by _reward on every candidate of every generation.
+        self._target_diffs = [b - a
+                              for a, b in zip(self.seq, self.seq[1:],
+                                              strict=False)]
 
     # ---- episode generation (policy rollout) ----
 
@@ -354,8 +365,7 @@ class NeuroEngine:
                       last_id: int) -> Node:
         """Fill one expression slot: sample a token, recurse per grammar.
         Every (state, action) pair lands in `trace` for the update."""
-        aid = self._sample(self._state_vec(budget, slot, last_id),
-                           self._legal_mask(budget, MASK_NORMAL), trace)
+        aid = self._sample(budget, slot, last_id, trace)
         tok = self.vocab[aid]
 
         if tok == "var":
@@ -371,8 +381,7 @@ class NeuroEngine:
             # piecewise fork: one comparison choice, two condition slots
             # (one level down), then both branches (structurally like the
             # two slots of a binary op)
-            cid = self._sample(self._state_vec(budget - 1, SLOT_CMP, aid),
-                               self._legal_mask(budget - 1, MASK_CMP), trace)
+            cid = self._sample(budget - 1, SLOT_CMP, aid, trace)
             cond_left = self._rollout_slot(budget - 2, SLOT_LEFT, trace, cid)
             cond_right = self._rollout_slot(budget - 2, SLOT_RIGHT, trace, cid)
             then = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, cid)
@@ -382,9 +391,7 @@ class NeuroEngine:
         if tok in (POW_NK, POW_KN):
             # constant side first: one const-only decision, then the
             # single open slot (n^k -> slot is the base, k^n -> exponent)
-            cid = self._sample(self._state_vec(budget - 1, SLOT_POW, aid),
-                               self._legal_mask(budget - 1, MASK_POW),
-                               trace)
+            cid = self._sample(budget - 1, SLOT_POW, aid, trace)
             const = Const(float(self.vocab[cid][1:]))
             sub = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, cid)
             if tok == POW_NK:
@@ -395,33 +402,45 @@ class NeuroEngine:
         right = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, aid)
         return BinOp(tok, left, right)
 
-    def _sample(self, state: np.ndarray, mask: np.ndarray,
-                trace: list) -> int:
-        """One policy decision: forward pass on the single state, mask
-        illegal tokens, sample by cumulative probability."""
-        p, _ = self.policy.forward(state[None, :])
-        probs = p[0] * mask
-        total = probs.sum()
-        if total <= 1e-9:
-            # defensive: masks are built to be non-empty, but never crash
-            probs = mask if mask.any() else None
-            if probs is None:
-                probs = np.zeros(len(self.vocab))
-                probs[:len(self.terminal_tokens)] = 1.0
+    def _sample(self, budget: int, slot: int, last_id: int, trace: list) -> int:
+        """One policy decision: sample a token from the policy's masked,
+        epsilon-soft distribution at this context. The distribution
+        depends only on (budget, slot, last_id) while the weights stay
+        constant within a generation, so it is computed once per context
+        (forward pass + mask + soft mixing) and cached; the sample itself
+        is one rng draw plus a searchsorted over the cumulative probs."""
+        key = (budget, slot, last_id)
+        cached = self._prob_cache.get(key)
+        if cached is None:
+            mode = (MASK_CMP if slot == SLOT_CMP
+                    else MASK_POW if slot == SLOT_POW else MASK_NORMAL)
+            state = self._state_vec(budget, slot, last_id)
+            mask = self._legal_mask(budget, mode)
+            p, _ = self.policy.forward(state[None, :])
+            probs = p[0] * mask
             total = probs.sum()
-        probs = probs / total
-        # epsilon-soft: mix in the uniform distribution over legal tokens
-        legal = int((mask > 0).sum()) or 1
-        probs = (1 - SOFT_EPS) * probs + SOFT_EPS * mask / legal
-        probs = probs / probs.sum()
+            if total <= 1e-9:
+                # defensive: masks are built to be non-empty, but never crash
+                if mask.any():
+                    probs = mask
+                else:
+                    probs = np.zeros(len(self.vocab))
+                    probs[:len(self.terminal_tokens)] = 1.0
+                total = probs.sum()
+            probs = probs / total
+            # epsilon-soft: mix in the uniform distribution over legal tokens
+            legal = int((mask > 0).sum()) or 1
+            probs = (1 - SOFT_EPS) * probs + SOFT_EPS * mask / legal
+            probs = probs / probs.sum()
+            cum = np.cumsum(probs)
+            cum[-1] = 1.0  # guard float rounding: r may exceed cum[-1]
+            cached = (state, cum)
+            self._prob_cache[key] = cached
+        state, cum = cached
         r = self.rng.random()
-        acc = 0.0
-        aid = len(self.vocab) - 1
-        for i, pr in enumerate(probs):
-            acc += pr
-            if r <= acc:
-                aid = i
-                break
+        aid = int(np.searchsorted(cum, r, side="right"))
+        if aid >= len(self.vocab):
+            aid = len(self.vocab) - 1
         trace.append((state, aid))
         return aid
 
@@ -511,7 +530,7 @@ class NeuroEngine:
         (shaping only — solve status comes from score_candidate alone)."""
         if sc.fitness == INVALID_FITNESS:
             return sc.fitness
-        diffs = [b - a for a, b in zip(self.seq, self.seq[1:], strict=False)]
+        diffs = self._target_diffs
         got = [b - a for a, b in zip(sc.values, sc.values[1:], strict=False)]
         d_err = sum(min(1.0, abs(g - t) / max(1.0, abs(t)))
                     for g, t in zip(got, diffs, strict=True)) / len(diffs)
@@ -520,15 +539,31 @@ class NeuroEngine:
     def step(self) -> GenerationResult:
         t0 = time.perf_counter()
         self.generation += 1
+        # new generation -> new weights after the last update/shock: the
+        # per-context sampling distributions are stale
+        self._prob_cache.clear()
         scored: list[tuple[Node, Score]] = []
         traces: list[list] = []
+        vals: list = []
+        # Scoring is pure and the policy concentrates: a batch re-produces
+        # the same trees many times (measured ~60% duplicates), so each
+        # distinct tree is scored once and its rounded-value dedupe key
+        # is reused for _update.
+        score_cache: dict[Node, Score] = {}
+        val_cache: dict[Node, tuple | None] = {}
         for _ in range(self.cfg.population):
             trace: list = []
             node = self._rollout_slot(self.cfg.max_depth, SLOT_ROOT,
                                       trace, last_id=0)
-            scored.append((node, score_candidate(node, self.seq,
-                                                 self.cfg.parsimony)))
+            sc = score_cache.get(node)
+            if sc is None:
+                sc = score_candidate(node, self.seq, self.cfg.parsimony)
+                score_cache[node] = sc
+                val_cache[node] = (tuple(round(v, 6) for v in sc.values)
+                                   if sc.values is not None else None)
+            scored.append((node, sc))
             traces.append(trace)
+            vals.append(val_cache[node])
         # Memetic pass BEFORE the policy update: refine the top formulas
         # with local algebraic moves. When a neighbor beats its parent,
         # the parent's trace reward is raised to the neighbor's — the
@@ -558,14 +593,16 @@ class NeuroEngine:
                     memetic_hits += 1
                     memetic_children.append(best)
                     # reinforce the parent's trace: raise its reward to
-                    # the refined child's (never lower it)
+                    # the refined child's (never lower it). NOTE: the
+                    # index is the FIRST STRUCTURAL duplicate on purpose
+                    # — with duplicate parents the raised slots (and thus
+                    # the CEM elite) must stay exactly as they were when
+                    # the 38/39 bench was measured; index-preserving
+                    # "cleanups" here change search behavior.
                     p_idx = next(i for i, (n, _) in enumerate(scored)
                                  if n == parent)
                     rewards[p_idx] = max(rewards[p_idx], self._reward(best[1]))
-        stats = self._update(traces, rewards,
-                             [tuple(round(v, 6) for v in sc.values)
-                              if sc.values is not None else None
-                              for _, sc in scored])
+        stats = self._update(traces, rewards, vals)
         stats["memetic_hits"] = memetic_hits
         scored.extend(memetic_children)
 
