@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def parse_ref(text: str) -> tuple:
     """A tiny parser to convert the human-readable reference formula to an AST tuple."""
-    text = text.replace("π", " pi ").replace("·", " * ").replace("mod", " % ")
-    tokens = re.findall(r'[a-zA-Z_]+|\d+\.\d+|\d+|[-+*/^%()!]', text)
+    text = text.replace("π", " pi ").replace("·", " * ")
+    tokens = re.findall(r'[a-zA-Z_]+|\d+\.\d+|\d+|[-+*/^%()<>,!]', text)
     pos = 0
     
     def peek():
@@ -38,12 +38,16 @@ def parse_ref(text: str) -> tuple:
         left = parse_factor()
         while True:
             p = peek()
-            if p in ('*', '/', '%'):
+            if p in ('*', '/', '%', 'mod'):
                 op = consume()
+                if op == 'mod':
+                    op = '%'
                 right = parse_factor()
                 left = (op, left, right)
-            elif p is not None and (p[0].isalnum() or p in ('(', 'pi', 'e')):
-                # implicit multiplication (e.g. "2n" or "n(n+1)")
+            elif p is not None and p not in ('if', 'then', 'else', 'mod') \
+                    and (p[0].isalnum() or p in ('(', 'pi', 'e')):
+                # implicit multiplication (e.g. "2n" or "n(n+1)");
+                # keywords must NOT be eaten as factors
                 right = parse_factor()
                 left = ('*', left, right)
             else:
@@ -73,6 +77,28 @@ def parse_ref(text: str) -> tuple:
             arg = parse_expr()
             consume(')')
             node = ('func', func, arg)
+        elif tok == 'mod':
+            # function-call form: mod(a, b)
+            consume('mod')
+            consume('(')
+            a = parse_expr()
+            consume(',')
+            b = parse_expr()
+            consume(')')
+            node = ('%', a, b)
+        elif tok == 'if':
+            # piecewise: if COND then A else B, COND = expr (<|>) expr
+            consume('if')
+            cond_left = parse_expr()
+            cmp_op = consume()
+            if cmp_op not in ('<', '>'):
+                raise ValueError(f"Expected < or > in if-condition, got {cmp_op}")
+            cond_right = parse_expr()
+            consume('then')
+            a = parse_expr()
+            consume('else')
+            b = parse_expr()
+            node = ('if', (cmp_op, cond_left, cond_right), a, b)
         elif tok == 'n':
             consume()
             node = ('n',)
@@ -132,6 +158,12 @@ def evaluate_ast(node: tuple, n: float) -> float:
         return evaluate_ast(node[1], n) / evaluate_ast(node[2], n)
     if t == '%':
         return evaluate_ast(node[1], n) % evaluate_ast(node[2], n)
+    if t == 'if':
+        cond_op, cl, cr = node[1]
+        cl_val = evaluate_ast(cl, n)
+        cr_val = evaluate_ast(cr, n)
+        hit = cl_val < cr_val if cond_op == '<' else cl_val > cr_val
+        return evaluate_ast(node[2], n) if hit else evaluate_ast(node[3], n)
     if t == '^':
         return evaluate_ast(node[1], n) ** evaluate_ast(node[2], n)
     raise ValueError(f"Unknown node type: {t}")
@@ -169,7 +201,11 @@ def verify_and_expand():
                     if val.is_integer():
                         val = int(val)
                     else:
-                        val = round(val, 6)
+                        # 12 SIGNIFICANT digits, not decimal places: round(6)
+                        # truncated tiny values (2^-7 = 0.0078125 became
+                        # 0.007812), making an exact hit (EPS 1e-9) impossible
+                        # for small-term puzzles like halving
+                        val = float(f"{val:.12g}")
                 new_terms.append(val)
             except Exception as e:
                 print(f"❌ Error evaluating {pid} at n={i}: {e}")
