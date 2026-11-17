@@ -9,6 +9,15 @@ to data/history.json, curiosities to data/curiosities.json.
 
 from __future__ import annotations
 
+import os
+
+# OpenBLAS sizes its pool to every logical CPU (20 here) and spin-waits
+# between calls; the neuro engine's matrices are tiny (48x48) and the
+# spinning pool starves the server's event loop — measured 900 ms/gen
+# dropping to ~40 ms/gen with a single BLAS thread. Must be set BEFORE
+# numpy loads (engine imports below pull it in).
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 import asyncio
 import json
 import math
@@ -796,7 +805,13 @@ class RunManager:
 
     def _save_curiosities(self) -> None:
         """Merge this run's best almost-correct monsters into the gallery."""
-        fresh = self.engine.curiosity_payloads(limit=CURIOSITY_PER_RUN)
+        # Only the GP engine tracks curiosities; a neuro run that solves
+        # used to crash right here (finish_reason flipped to engine_error
+        # AFTER a correct solve) because NeuroEngine has no such method.
+        getter = getattr(self.engine, "curiosity_payloads", None)
+        if getter is None:
+            return
+        fresh = getter(limit=CURIOSITY_PER_RUN)
         if not fresh:
             return
         gallery = _load_json(CURIOSITY_FILE, [])
