@@ -57,14 +57,29 @@ IF_TOKEN = "if"  # noqa: S105  (grammar token, not a credential)
 # Memetic const nudges: the moves a hill-climb actually needs — fix an
 # off-by-one constant, snap a half, adjust a coefficient by one.
 MEMETIC_DELTAS = (-2.0, -1.0, -0.5, 0.5, 1.0, 2.0)
+# Share of memetic tries spent on the WRAP move (add/subtract a small
+# constant term to the whole formula). The finishing move for composite
+# families: 4n^2-4n climbs to fitness 0.84 on (2n-1)^2 and stalls there —
+# no constant nudge reaches 4n^2-4n+1 (the exact answer) because adding
+# a NEW term is not a local move on any existing node. The GP engine's
+# root_mutation has always had this jump; the memetic pass did not.
+# Improvements-only keeps the move harmless elsewhere.
+MEMETIC_WRAP_P = 0.25
 
 
 def _mutated_neighbor(tree: Node, rng: random.Random,
                       ops: tuple[str, ...],
                       funcs: tuple[str, ...]) -> Node | None:
     """One small algebraic mutation of a formula: nudge a constant,
-    swap an operator/function, or drop a wrapper. Returns None when the
-    picked spot has no meaningful local move (a bare Var)."""
+    swap an operator/function, drop a wrapper, or (MEMETIC_WRAP_P of
+    tries) add/subtract a small constant term to the whole formula.
+    Returns None when the picked spot has no meaningful local move (a
+    bare Var)."""
+    if rng.random() < MEMETIC_WRAP_P:
+        delta = rng.choice(MEMETIC_DELTAS)
+        if rng.random() < 0.5:
+            return BinOp("+", tree, Const(delta))
+        return BinOp("-", tree, Const(delta))
     path = random_path(rng, tree)
     target = subtree_at(tree, path)
     if isinstance(target, Const):

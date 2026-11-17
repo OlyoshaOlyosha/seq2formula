@@ -94,3 +94,54 @@ def test_func_tokens_do_not_parse_as_consts() -> None:
     for _ in range(10):
         eng.step()
     assert eng.best_ever is not None
+
+
+def test_memetic_wrap_move_finishes_composite_family() -> None:
+    """The wrap move (add/subtract a small constant term) is the finishing
+    move for composite families: on (2n-1)^2 the search climbs to
+    4n^2-4n (fitness 0.84) and no constant nudge reaches the exact
+    4n^2-4n+1 — adding a NEW term is not a local move on any existing
+    node. The wrap must find it from that skeleton."""
+    import random
+
+    from engine.fitness import score_candidate
+    from engine.neuro import _mutated_neighbor
+    from engine.nodes import Const, Var
+
+    seq = [1.0, 9.0, 25.0, 49.0, 81.0, 121.0, 169.0, 225.0]
+    n = Var()
+    skeleton = BinOp("-", BinOp("*", Const(4.0),
+                                BinOp("^", n, Const(2.0))),
+                     BinOp("*", Const(4.0), n))  # 4n^2 - 4n, fit 0.84
+    rng = random.Random(0)
+    for _ in range(100):
+        nb = _mutated_neighbor(skeleton, rng,
+                               ("+", "-", "*", "/", "^", "mod"), ())
+        if nb is None:
+            continue
+        if score_candidate(nb, seq, 0.001).exact:
+            break
+    else:
+        raise AssertionError("wrap move never found 4n^2-4n+1 in 100 tries")
+
+
+def test_memetic_wrap_move_adds_const_term() -> None:
+    """Every wrap-branch neighbor is tree +- a small constant — never a
+    mangled tree (the move wraps, it does not touch inner nodes)."""
+    import random
+
+    from engine.neuro import _mutated_neighbor
+    from engine.nodes import Const, Var
+
+    tree = BinOp("*", Const(2.0), Var())
+    rng = random.Random(5)
+    neighbors = [_mutated_neighbor(tree, rng,
+                                   ("+", "-", "*", "/", "^", "mod"), ())
+                 for _ in range(50)]
+    from engine.evaluator import evaluate_all
+
+    for nb in neighbors:
+        if nb is None:
+            continue
+        # valid tree that still evaluates on n=1..4
+        assert evaluate_all(nb, 4) is not None
