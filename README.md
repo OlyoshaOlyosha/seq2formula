@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-122%20passed-3FC07A)
+![Tests](https://img.shields.io/badge/tests-140%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 **Watch evolution discover the mathematical formulas behind number sequences.**
@@ -23,8 +23,8 @@ Everything runs locally on your machine. No internet access, no telemetry, and n
 - **Curve Mode**: The same engine fits parametric formulas to 2D point sets — draw a circle, a spiral, a wave or even a multi-stroke smiley, and watch the search match your shape on a canvas.
 - **Neuro Engine (Stage 2)**: A reinforcement-learning alternative to the genetic search — a small neural policy (numpy only) assembles formulas token by token and trains live, with its own `/neuro` page full of learning curves, policy entropy and "what the network is thinking" token bars. A memetic refinement pass (local algebraic tweaks of the top formulas) lifted the hard tier to 11/13 puzzles.
 - **Autopilot (Batch Mode)**: Queue up the entire library and let the engine solve puzzles one by one in the background.
-- **Advanced Math**: The engine supports basic arithmetic, roots, factorials, floor, trigonometry (`sin`, `cos`), logarithms, and constants like π and e.
-- **65 Built-in Sequences**: A curated library of puzzles ranging from simple linear progressions to famous sequences like Fibonacci and Catalan numbers.
+- **Advanced Math**: The engine supports basic arithmetic, roots, factorials, floor, trigonometry (`sin`, `cos`), logarithms, constants like π and e, and an optional piecewise `if` fork (comparisons as 0/1 values, rendered as a cases expression).
+- **66 Built-in Sequences**: A curated library of puzzles ranging from simple linear progressions to famous sequences like Fibonacci and Catalan numbers.
 - **Custom Sequences**: Input your own numbers, specify a reference formula, and watch the engine find it.
 - **Reproducibility**: Enter a "seed" number to replay the exact same evolutionary search, or leave it blank for a fresh random run.
 
@@ -77,7 +77,7 @@ Experimental, in continuous development.
 - Grammar v2 (done) — unary functions (roots, factorial, trigonometry,
   logarithm), the remainder operator, and the π / e constants, with the
   picker regrouped into basic and advanced sets; puzzle tiers T4/T5
-  showcase the new operations (65 puzzles in total).
+  showcase the new operations (66 puzzles in total).
 - Performance and search quality (done) — compiled-formula evaluation
   (~3× faster generations), diversity mechanics (fitness sharing,
   adaptive anti-stagnation shocks, weighted parsimony), and a settings
