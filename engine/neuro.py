@@ -36,7 +36,7 @@ import numpy as np
 from .fitness import INVALID_FITNESS, Score, score_candidate
 from .gp import Best, GenerationResult
 from .grammar import EXP_RANGE, random_path, replace_subtree, subtree_at
-from .nodes import BinOp, Const, Neg, Node, UnOp, Var
+from .nodes import CMP_OPS, BinOp, Const, If, Neg, Node, UnOp, Var
 
 # Vocabulary: constants get their own tokens (the network must learn WHICH
 # number fits the puzzle — 2 for 2 4 8, bias 5 for 6 7 8), so the token set
@@ -52,6 +52,7 @@ EXP_BASE_CONSTS = (-5.0, -3.0, -2.0, -1.0, 0.5, 1.5, 2.0, 3.0, 4.0, 5.0,
                    10.0)
 POW_NK, POW_KN = "^nk", "^kn"
 NEG_TOKEN = "neg"  # noqa: S105  (grammar token, not a credential)
+IF_TOKEN = "if"  # noqa: S105  (grammar token, not a credential)
 
 # Memetic const nudges: the moves a hill-climb actually needs — fix an
 # off-by-one constant, snap a half, adjust a coefficient by one.
@@ -78,6 +79,16 @@ def _mutated_neighbor(tree: Node, rng: random.Random,
                 and not isinstance(right, Const):
             right = Const(float(rng.randint(*EXP_RANGE)))
         new = BinOp(op, left, right)
+    elif isinstance(target, If):
+        # Flip the comparison (mirror of the condition) or swap the
+        # branches — the two meaningful local moves at a fork
+        if rng.random() < 0.5 and isinstance(target.cond, BinOp) \
+                and target.cond.op in CMP_OPS:
+            cond = BinOp("<" if target.cond.op == ">" else ">",
+                         target.cond.left, target.cond.right)
+            new = If(cond, target.then, target.otherwise)
+        else:
+            new = If(target.cond, target.otherwise, target.then)
     elif isinstance(target, UnOp):
         new = UnOp(rng.choice(funcs), target.child) if funcs else target.child
     elif isinstance(target, Neg):
@@ -87,9 +98,14 @@ def _mutated_neighbor(tree: Node, rng: random.Random,
     return replace_subtree(tree, path, new)
 
 # Slot kinds fed to the policy (one-hot): root of the tree, left/right
-# operand of a binary op, argument of a unary function or neg, and the
-# constant-only exponent/base choice inside a ^ form.
-SLOT_ROOT, SLOT_LEFT, SLOT_RIGHT, SLOT_ARG, SLOT_POW = range(5)
+# operand of a binary op, argument of a unary function or neg, the
+# constant-only exponent/base choice inside a ^ form, and the comparison
+# choice of an if-condition.
+SLOT_ROOT, SLOT_LEFT, SLOT_RIGHT, SLOT_ARG, SLOT_POW, SLOT_CMP = range(6)
+
+# Mask modes for _legal_mask: 0 = normal expression slot, 1 = the
+# const-only ^ exponent/base choice, 2 = the if-cond comparison choice.
+MASK_NORMAL, MASK_POW, MASK_CMP = range(3)
 
 # Stabilizers: advantages are centred (running baseline) and scaled by
 # the batch std — reward spread is tiny early on, so raw advantages make
@@ -225,6 +241,12 @@ class NeuroEngine:
         self.op_tokens = [o for o in self.cfg.allowed_ops if o != "^"]
         self.vocab = (self.terminal_tokens + self.op_tokens
                       + list(self.funcs) + [NEG_TOKEN, POW_NK, POW_KN])
+        # Piecewise forks: reachable only through comparisons (the cond is
+        # always drawn as one), so the if token exists iff a comparison
+        # op is in the allowed set
+        self.if_enabled = any(op in CMP_OPS for op in self.cfg.allowed_ops)
+        if self.if_enabled:
+            self.vocab.append(IF_TOKEN)
         self.tok_id = {t: i for i, t in enumerate(self.vocab)}
         self.const_ids = [self.tok_id[f"c{c:g}"] for c in self.consts]
         # exponent/base choice must stay inside the safe ^ range
@@ -243,7 +265,7 @@ class NeuroEngine:
         self.puzzle_feats = np.array([len(self.seq) / 12.0, *head, *diffs],
                                      dtype=float)
         self.in_dim = len(self.puzzle_feats) + (self.cfg.max_depth + 1) \
-            + 5 + len(self.vocab)
+            + 6 + len(self.vocab)
 
         self.policy = _Policy(self.in_dim, 48, len(self.vocab), self.nprng)
         self.generation = 0
@@ -257,16 +279,22 @@ class NeuroEngine:
 
     # ---- episode generation (policy rollout) ----
 
-    def _legal_mask(self, budget: int, const_only: bool) -> np.ndarray:
-        # masks depend only on (budget, const_only) — hot path, cached
-        key = (budget, const_only)
+    def _legal_mask(self, budget: int, mode: int = MASK_NORMAL) -> np.ndarray:
+        # masks depend only on (budget, mode) — hot path, cached
+        key = (budget, mode)
         cached = self._mask_cache.get(key)
         if cached is not None:
             return cached
         mask = np.zeros(len(self.vocab))
-        if const_only:  # the exponent/base decision of a ^ form
+        if mode == MASK_POW:  # the exponent/base decision of a ^ form
             for i in self.exp_ids:
                 mask[i] = 1.0
+            self._mask_cache[key] = mask
+            return mask
+        if mode == MASK_CMP:  # the comparison choice of an if-cond
+            for op in CMP_OPS:
+                if op in self.tok_id:
+                    mask[self.tok_id[op]] = 1.0
             self._mask_cache[key] = mask
             return mask
         if budget <= 1:  # no room for another internal node: terminal only
@@ -283,6 +311,10 @@ class NeuroEngine:
             if "^" in self.cfg.allowed_ops:
                 mask[self.tok_id[POW_NK]] = 1.0
                 mask[self.tok_id[POW_KN]] = 1.0
+            if self.if_enabled:
+                # fork at budget 2: cond children and both branches all
+                # resolve to terminals — the shallowest legal piecewise
+                mask[self.tok_id[IF_TOKEN]] = 1.0
         self._mask_cache[key] = mask
         return mask
 
@@ -295,7 +327,7 @@ class NeuroEngine:
             return cached
         depth_oh = np.zeros(self.cfg.max_depth + 1)
         depth_oh[min(budget, self.cfg.max_depth)] = 1.0
-        slot_oh = np.zeros(5)
+        slot_oh = np.zeros(6)
         slot_oh[slot] = 1.0
         last_oh = np.zeros(len(self.vocab))
         last_oh[last_id] = 1.0
@@ -308,7 +340,7 @@ class NeuroEngine:
         """Fill one expression slot: sample a token, recurse per grammar.
         Every (state, action) pair lands in `trace` for the update."""
         aid = self._sample(self._state_vec(budget, slot, last_id),
-                           self._legal_mask(budget, const_only=False), trace)
+                           self._legal_mask(budget, MASK_NORMAL), trace)
         tok = self.vocab[aid]
 
         if tok == "var":
@@ -320,11 +352,23 @@ class NeuroEngine:
             return Neg(self._rollout_slot(budget - 1, SLOT_ARG, trace, aid))
         if tok.startswith("c"):
             return Const(float(tok[1:]))
+        if tok == IF_TOKEN:
+            # piecewise fork: one comparison choice, two condition slots
+            # (one level down), then both branches (structurally like the
+            # two slots of a binary op)
+            cid = self._sample(self._state_vec(budget - 1, SLOT_CMP, aid),
+                               self._legal_mask(budget - 1, MASK_CMP), trace)
+            cond_left = self._rollout_slot(budget - 2, SLOT_LEFT, trace, cid)
+            cond_right = self._rollout_slot(budget - 2, SLOT_RIGHT, trace, cid)
+            then = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, cid)
+            otherwise = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, cid)
+            cond = BinOp(self.vocab[cid], cond_left, cond_right)
+            return If(cond, then, otherwise)
         if tok in (POW_NK, POW_KN):
             # constant side first: one const-only decision, then the
             # single open slot (n^k -> slot is the base, k^n -> exponent)
             cid = self._sample(self._state_vec(budget - 1, SLOT_POW, aid),
-                               self._legal_mask(budget - 1, const_only=True),
+                               self._legal_mask(budget - 1, MASK_POW),
                                trace)
             const = Const(float(self.vocab[cid][1:]))
             sub = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, cid)
@@ -402,10 +446,12 @@ class NeuroEngine:
         p, cache = self.policy.forward(x)
         d0 = len(self.puzzle_feats)
         depths = x[:, d0:d0 + self.cfg.max_depth + 1].argmax(axis=1)
-        slots = x[:, d0 + self.cfg.max_depth + 1:d0 + self.cfg.max_depth + 6]
+        slots = x[:, d0 + self.cfg.max_depth + 1:d0 + self.cfg.max_depth + 7]
         slots = slots.argmax(axis=1)
-        masks = np.stack([self._legal_mask(int(b), int(s) == SLOT_POW)
-                          for b, s in zip(depths, slots, strict=True)])
+        masks = np.stack([
+            self._legal_mask(int(b), MASK_POW if s == SLOT_POW else
+                             (MASK_CMP if s == SLOT_CMP else MASK_NORMAL))
+            for b, s in zip(depths, slots, strict=True)])
         legal = masks.sum(axis=1, keepdims=True)
         p = (1 - SOFT_EPS) * p + SOFT_EPS * masks / legal
         p /= p.sum(axis=1, keepdims=True)

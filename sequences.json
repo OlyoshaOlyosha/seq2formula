@@ -1071,6 +1071,23 @@
       "reference": "n^3 + n^2 + n + 1"
     },
     {
+      "id": "t3-parity",
+      "tier": 3,
+      "name": "Чёт-нечет",
+      "terms": [
+        7,
+        3,
+        7,
+        3,
+        7,
+        3,
+        7,
+        3
+      ],
+      "reference": "if mod(n, 2) > 0.5 then 7 else 3",
+      "requires": ["if", "mod"]
+    },
+    {
       "id": "t4-factorial-minus-one",
       "tier": 4,
       "name": "Факториал без единицы",

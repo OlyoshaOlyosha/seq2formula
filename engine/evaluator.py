@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 
-from .nodes import Const, Neg, Node, UnOp, Var
+from .nodes import Const, If, Neg, Node, UnOp, Var
 
 # Anything beyond this magnitude counts as overflow: it already dwarfs
 # every sane sequence target and keeps the fitness math in safe ranges.
@@ -75,6 +75,13 @@ def _eval(node: Node, n: float) -> float:
         if fn is None:
             raise ValueError(f"unknown function: {node.name!r}")
         return fn(_eval(node.child, n))
+    if isinstance(node, If):
+        # NaN cond compares != 0 as True and takes the then branch —
+        # garbage in, garbage out; the BIG guard on the result is the
+        # real filter
+        cond = _eval(node.cond, n)
+        return (_eval(node.then, n) if cond != 0
+                else _eval(node.otherwise, n))
     left = _eval(node.left, n)
     right = _eval(node.right, n)
     if node.op == "+":
@@ -87,6 +94,10 @@ def _eval(node: Node, n: float) -> float:
         return left / right
     if node.op == "mod":
         return left % right
+    if node.op == "<":
+        return 1.0 if left < right else 0.0
+    if node.op == ">":
+        return 1.0 if left > right else 0.0
     return left ** right  # ^
 
 
@@ -109,6 +120,11 @@ def compile_node(node: Node):
             raise ValueError(f"unknown function: {node.name!r}")
         child = compile_node(node.child)
         return lambda n: fn(child(n))
+    if isinstance(node, If):
+        cond = compile_node(node.cond)
+        then = compile_node(node.then)
+        otherwise = compile_node(node.otherwise)
+        return lambda n: then(n) if cond(n) != 0 else otherwise(n)
     op = node.op
     left = compile_node(node.left)
     right = compile_node(node.right)
@@ -122,6 +138,10 @@ def compile_node(node: Node):
         return lambda n: left(n) / right(n)
     if op == "mod":
         return lambda n: left(n) % right(n)
+    if op == "<":
+        return lambda n: 1.0 if left(n) < right(n) else 0.0
+    if op == ">":
+        return lambda n: 1.0 if left(n) > right(n) else 0.0
     return lambda n: left(n) ** right(n)
 
 

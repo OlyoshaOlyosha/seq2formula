@@ -47,6 +47,7 @@ function astToLatex(ast) {
     if (ast.n === "sqrt") return `\\sqrt{${inner}}`;
     if (ast.n === "cbrt") return `\\sqrt[3]{${inner}}`;
     if (ast.n === "abs") return `\\left|${inner}\\right|`;
+    if (ast.n === "floor") return `\\left\\lfloor${inner}\\right\\rfloor`;
     if (ast.n === "fact") {
       const bare = ast.x.t === "n" || (ast.x.t === "c" && ast.x.v >= 0);
       return `${bare ? inner : `\\left(${inner}\\right)`}!`;
@@ -57,6 +58,10 @@ function astToLatex(ast) {
   if (neg !== null) {
     const op = ast.t === "+" ? "-" : "+";
     return `${astToLatex(ast.l)} ${op} ${numText(Math.abs(neg))}`;
+  }
+  if (ast.t === "if") {
+    // piecewise fork: the cases environment draws its own left brace
+    return `\\begin{cases}${astToLatex(ast.a)} & \\text{если } ${astToLatex(ast.c)} \\\\ ${astToLatex(ast.b)} & \\text{иначе}\\end{cases}`;
   }
   const L = astToLatex(ast.l);
   const R = astToLatex(ast.r);
@@ -69,6 +74,8 @@ function astToLatex(ast) {
     case "/": return `\\frac{${L}}{${R}}`;
     case "mod": return `\\left(${L}\\right) \\bmod \\left(${R}\\right)`;
     case "^": return `${isSimple(L) ? L : `\\left(${L}\\right)`}^{${R}}`;
+    case "<": return `${L} \\lt ${R}`;
+    case ">": return `${L} \\gt ${R}`;
   }
   return "?";
 }

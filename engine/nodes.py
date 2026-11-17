@@ -20,6 +20,12 @@ _MAX_JSON_DEPTH = 64
 # names — including the JSON tag validation.
 UNARY_FUNCS = ("sqrt", "cbrt", "fact", "abs", "floor", "sin", "cos", "tan", "ln")
 
+# Comparison operators (grammar v3): evaluate to 1.0 / 0.0 and gate the
+# If node — the grammar draws a piecewise `if` whenever a comparison op
+# is enabled. Kept OUT of BINARY_OPS on purpose: comparisons are opt-in
+# via the "if" chip (default off, same dilution protocol as floor).
+CMP_OPS = ("<", ">")
+
 # Special constants drawn from the terminal pool when enabled ("pi",
 # "e" picker tokens). Stored as plain Const values — they participate
 # in arithmetic, serialization and fitness with no special-casing
@@ -60,14 +66,23 @@ class UnOp(Node):
 
 @dataclass(frozen=True)
 class BinOp(Node):
-    op: str  # one of + - * / ^ mod
+    op: str  # one of + - * / ^ mod < >
     left: Node
     right: Node
 
 
+@dataclass(frozen=True)
+class If(Node):
+    """Piecewise fork (grammar v3): evaluates cond and returns the then
+    branch when it is non-zero, the otherwise branch otherwise."""
+    cond: Node
+    then: Node
+    otherwise: Node
+
+
 VAR = Var()
 
-_PREC = {"+": 1, "-": 1, "mod": 1, "*": 2, "/": 2, "^": 4}
+_PREC = {"+": 1, "-": 1, "mod": 1, "*": 2, "/": 2, "^": 4, "<": 0, ">": 0}
 _NEG_PREC = 3
 
 
@@ -75,6 +90,9 @@ def size(node: Node) -> int:
     """Number of nodes in the tree (the parsimony measure)."""
     if isinstance(node, BinOp):
         return 1 + size(node.left) + size(node.right)
+    if isinstance(node, If):
+        return (1 + size(node.cond) + size(node.then)
+                + size(node.otherwise))
     if isinstance(node, (Neg, UnOp)):
         return 1 + size(node.child)
     return 1
@@ -102,6 +120,12 @@ def weighted_size(node: Node) -> float:
         # costs 1.0. Modulo is a "patch" operation, it costs 2.0.
         weight = 2.0 if node.op == "mod" else 1.0
         return weight + weighted_size(node.left) + weighted_size(node.right)
+    if isinstance(node, If):
+        # A fork is structural overhead like a function call (2.0) and
+        # pays for its three subtrees, so degenerate if-branches lose to
+        # the bare branch on parsimony.
+        return (2.0 + weighted_size(node.cond) + weighted_size(node.then)
+                + weighted_size(node.otherwise))
     if isinstance(node, UnOp):
         return 2.0 + weighted_size(node.child)
     if isinstance(node, Neg):
@@ -114,6 +138,9 @@ def weighted_size(node: Node) -> float:
 def depth(node: Node) -> int:
     if isinstance(node, BinOp):
         return 1 + max(depth(node.left), depth(node.right))
+    if isinstance(node, If):
+        return 1 + max(depth(node.cond), depth(node.then),
+                       depth(node.otherwise))
     if isinstance(node, (Neg, UnOp)):
         return 1 + depth(node.child)
     return 1
@@ -146,6 +173,18 @@ def _extract_terms(node: Node, sign: float = 1.0) -> list[tuple[float, Node]]:
 def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")) -> Node:
     """Algebraic simplification: x + x -> 2 * x, x * 1 -> x, etc.
     Makes formulas shorter, prettier, and faster to evaluate."""
+    if isinstance(node, If):
+        cond = simplify(node.cond, ops)
+        then = simplify(node.then, ops)
+        otherwise = simplify(node.otherwise, ops)
+        # Constant condition: the fork collapses to one branch
+        if isinstance(cond, Const):
+            return then if cond.value != 0 else otherwise
+        # Equal branches: the fork is dead weight
+        if then == otherwise:
+            return then
+        return If(cond, then, otherwise)
+
     if isinstance(node, BinOp):
         left = simplify(node.left, ops)
         right = simplify(node.right, ops)
@@ -210,6 +249,12 @@ def simplify(node: Node, ops: tuple[str, ...] = ("+", "-", "*", "/", "^", "mod")
                     return Const(left.value / right.value)
                 if node.op == "mod" and right.value != 0:
                     return Const(left.value % right.value)
+                if node.op in CMP_OPS:
+                    # NaN compares False on both sides -> folds to 0.0,
+                    # matching the evaluator's behavior
+                    hit = (left.value < right.value if node.op == "<"
+                           else left.value > right.value)
+                    return Const(1.0 if hit else 0.0)
                 if node.op == "^":
                     val = left.value ** right.value
                     if isinstance(val, complex) or not math.isfinite(val):
@@ -317,6 +362,12 @@ def _fmt(node: Node, parent_prec: int) -> str:
         return "n"
     if isinstance(node, Neg):
         return "-" + _fmt(node.child, _NEG_PREC)
+    if isinstance(node, If):
+        # Bind loosest: only the root renders without parens, anything
+        # combined with an operator wraps the whole fork
+        text = (f"if {_fmt(node.cond, 0)} then {_fmt(node.then, 1)}"
+                f" else {_fmt(node.otherwise, 1)}")
+        return f"({text})" if parent_prec > 0 else text
     if isinstance(node, UnOp):
         if node.name == "fact":
             return _fact_text(node.child) + "!"
@@ -361,7 +412,7 @@ def _neg_const(node: Node) -> float | None:
 
 def to_dict(node: Node) -> dict:
     """Compact JSON form: c=const, n=var, ~=neg, f=unary function,
-    binary op letter / 'mod'."""
+    binary op letter / 'mod', if=ternary fork (c/a/b = cond/then/else)."""
     if isinstance(node, Const):
         return {"t": "c", "v": node.value}
     if isinstance(node, Var):
@@ -370,6 +421,9 @@ def to_dict(node: Node) -> dict:
         return {"t": "~", "x": to_dict(node.child)}
     if isinstance(node, UnOp):
         return {"t": "f", "n": node.name, "x": to_dict(node.child)}
+    if isinstance(node, If):
+        return {"t": "if", "c": to_dict(node.cond),
+                "a": to_dict(node.then), "b": to_dict(node.otherwise)}
     return {"t": node.op, "l": to_dict(node.left), "r": to_dict(node.right)}
 
 
@@ -393,6 +447,13 @@ def from_dict(data: dict, _depth: int = 0) -> Node:
         if name not in UNARY_FUNCS:
             raise ValueError(f"unknown function: {name!r}")
         return UnOp(name, from_dict(data["x"], _depth + 1))
+    if kind == "if":
+        for key in ("c", "a", "b"):
+            if key not in data:
+                raise ValueError("bad if-node: missing branch")
+        return If(from_dict(data["c"], _depth + 1),
+                  from_dict(data["a"], _depth + 1),
+                  from_dict(data["b"], _depth + 1))
     if kind in _PREC:
         return BinOp(kind, from_dict(data["l"], _depth + 1),
                      from_dict(data["r"], _depth + 1))

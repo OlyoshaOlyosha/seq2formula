@@ -4,12 +4,27 @@ from .curve import CurveConfig, CurveGP
 from .evaluator import evaluate, evaluate_all
 from .fitness import EPS, Score, score_candidate, term_error
 from .gp import GPConfig, GPEngine
-from .nodes import UNARY_FUNCS, BinOp, Const, Neg, Node, UnOp, Var, depth, from_dict, size, to_dict, to_text
+from .nodes import (
+    CMP_OPS,
+    UNARY_FUNCS,
+    BinOp,
+    Const,
+    If,
+    Neg,
+    Node,
+    UnOp,
+    Var,
+    depth,
+    from_dict,
+    size,
+    to_dict,
+    to_text,
+)
 
 __all__ = [
     "evaluate", "evaluate_all",
     "EPS", "Score", "score_candidate", "term_error",
     "GPConfig", "GPEngine", "CurveConfig", "CurveGP",
-    "BinOp", "Const", "Neg", "Node", "UnOp", "UNARY_FUNCS", "Var",
+    "BinOp", "CMP_OPS", "Const", "If", "Neg", "Node", "UnOp", "UNARY_FUNCS", "Var",
     "depth", "from_dict", "size", "to_dict", "to_text",
 ]

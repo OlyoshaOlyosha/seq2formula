@@ -17,13 +17,30 @@ specials simply never draw.
 Every grammar function takes the same tail of keyword arguments:
 ops (binary), funcs (unary), specials (π/e as float values). Empty
 tuples mean "feature not enabled" and reproduce v1 behavior exactly.
+
+Grammar v3 additions: comparison ops (< >) and the piecewise If node.
+Comparisons join the ops tuple (they evaluate to 1.0 / 0.0); an If node
+is drawn with a low probability whenever any comparison is enabled —
+it is opt-in via the same protocol as floor, never a default.
 """
 
 from __future__ import annotations
 
 import random
 
-from .nodes import VAR, BinOp, Const, Neg, Node, UnOp, Var, depth, size
+from .nodes import (
+    CMP_OPS,
+    VAR,
+    BinOp,
+    Const,
+    If,
+    Neg,
+    Node,
+    UnOp,
+    Var,
+    depth,
+    size,
+)
 
 BINARY_OPS = ("+", "-", "*", "/", "^", "mod")
 # Small integers cover the classic puzzles; the LARGE_CONSTS bucket makes
@@ -45,6 +62,17 @@ MAX_INIT_DEPTH = 6
 UNARY_NODE_P = 0.18
 # Chance that a constant draw is π or e (when specials are enabled).
 SPECIAL_CONST_P = 0.12
+# Chance that an internal node is a piecewise If fork when comparisons
+# are enabled. Kept very low: an if triples the tree it touches, and
+# the classic puzzles must stay solvable at the same speed with the
+# chip left on.
+IF_NODE_P = 0.05
+
+
+def _if_enabled(ops: tuple[str, ...]) -> bool:
+    """Comparisons in the ops tuple are what makes If legal (the cond
+    is always drawn as a comparison)."""
+    return any(op in CMP_OPS for op in ops)
 
 
 def _rand_const(rng: random.Random, specials: tuple[float, ...] = ()) -> Const:
@@ -100,6 +128,19 @@ def random_tree(rng: random.Random, max_depth: int, method: str = "grow",
         name = rng.choice(funcs)
         child = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
         return _wrap_func(name, child)
+    if _if_enabled(ops) and max_depth >= 3 and rng.random() < IF_NODE_P:
+        # Piecewise fork: the condition is always a comparison of two
+        # subexpressions (two levels down), the branches get the rest
+        cmp_ops = [op for op in ops if op in CMP_OPS]
+        cond = BinOp(rng.choice(cmp_ops),
+                     random_tree(rng, max_depth - 2, method, ops, funcs,
+                                 specials),
+                     random_tree(rng, max_depth - 2, method, ops, funcs,
+                                 specials))
+        then = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
+        otherwise = random_tree(rng, max_depth - 1, method, ops, funcs,
+                                specials)
+        return If(cond, then, otherwise)
     op = rng.choice(ops)
     if op == "^":
         if rng.random() < 0.5:  # n^k form: constant exponent
@@ -118,6 +159,8 @@ def subtree_at(node: Node, path: tuple[int, ...]) -> Node:
     for step in path:
         if isinstance(node, BinOp):
             node = node.left if step == 0 else node.right
+        elif isinstance(node, If):
+            node = (node.cond, node.then, node.otherwise)[step]
         elif isinstance(node, (Neg, UnOp)):
             node = node.child
         else:  # terminal: path overshoots, the terminal itself is the spot
@@ -133,6 +176,15 @@ def replace_subtree(node: Node, path: tuple[int, ...], new: Node) -> Node:
         if path[0] == 0:
             return BinOp(node.op, replace_subtree(node.left, path[1:], new), node.right)
         return BinOp(node.op, node.left, replace_subtree(node.right, path[1:], new))
+    if isinstance(node, If):
+        if path[0] == 0:
+            return If(replace_subtree(node.cond, path[1:], new),
+                      node.then, node.otherwise)
+        if path[0] == 1:
+            return If(node.cond, replace_subtree(node.then, path[1:], new),
+                      node.otherwise)
+        return If(node.cond, node.then,
+                  replace_subtree(node.otherwise, path[1:], new))
     if isinstance(node, UnOp) and path[0] == 0:
         return UnOp(node.name, replace_subtree(node.child, path[1:], new))
     if isinstance(node, Neg) and path[0] == 0:
@@ -162,6 +214,20 @@ def random_path(rng: random.Random, node: Node) -> tuple[int, ...]:
                 k -= left_size
                 node = node.right
                 path.append(1)
+        elif isinstance(node, If):
+            cond_size = size(node.cond)
+            then_size = size(node.then)
+            if k < cond_size:
+                node = node.cond
+                path.append(0)
+            elif k < cond_size + then_size:
+                k -= cond_size
+                node = node.then
+                path.append(1)
+            else:
+                k -= cond_size + then_size
+                node = node.otherwise
+                path.append(2)
         elif isinstance(node, (Neg, UnOp)):
             node = node.child
             path.append(0)
@@ -196,6 +262,19 @@ def _repair_splice(node: Node, path: tuple[int, ...], rng: random.Random,
             else:
                 return BinOp(rng.choice(ops), left, right)
         return BinOp(node.op, left, right)
+    if isinstance(node, If):
+        cond = _repair_splice(node.cond, rest, rng, ops) if step == 0 \
+            else node.cond
+        then = _repair_splice(node.then, rest, rng, ops) if step == 1 \
+            else node.then
+        otherwise = _repair_splice(node.otherwise, rest, rng, ops) \
+            if step == 2 else node.otherwise
+        # invariant: a fork's condition is always a comparison — a splice
+        # can graft a whole fork (or any expression) into the cond slot;
+        # normalize with an explicit > 0 test (the evaluator's truthiness)
+        if not (isinstance(cond, BinOp) and cond.op in CMP_OPS):
+            cond = BinOp(">", cond, Const(0.0))
+        return If(cond, then, otherwise)
     if isinstance(node, UnOp):
         return UnOp(node.name, _repair_splice(node.child, rest, rng, ops))
     if isinstance(node, Neg):
@@ -212,7 +291,8 @@ def ensure_grammar(node: Node, rng: random.Random,
     corrupt splice) strips to its argument. A splice can leave n*n under
     a ^; re-roll a constant exponent rather than rejecting the child
     (keeps operator flow simple). When ^ is disabled entirely, a bare ^
-    swaps to an allowed operator."""
+    swaps to an allowed operator. Comparisons disabled: a comparison node
+    strips to its left side and an If fork keeps just the then branch."""
     if isinstance(node, BinOp):
         left = ensure_grammar(node.left, rng, ops, funcs, specials)
         right = ensure_grammar(node.right, rng, ops, funcs, specials)
@@ -222,7 +302,21 @@ def ensure_grammar(node: Node, rng: random.Random,
                 right = _rand_exp(rng)
             else:
                 return BinOp(rng.choice(ops), left, right)
+        if node.op in CMP_OPS and node.op not in ops:
+            return left  # strip the comparison, keep the left operand
         return BinOp(node.op, left, right)
+    if isinstance(node, If):
+        cond = ensure_grammar(node.cond, rng, ops, funcs, specials)
+        then = ensure_grammar(node.then, rng, ops, funcs, specials)
+        otherwise = ensure_grammar(node.otherwise, rng, ops, funcs, specials)
+        if not _if_enabled(ops):
+            return then  # the fork is illegal: keep one branch
+        # invariant: a fork's condition is always a comparison — a splice
+        # can graft a whole fork (or any expression) into the cond slot;
+        # normalize with an explicit > 0 test (the evaluator's truthiness)
+        if not (isinstance(cond, BinOp) and cond.op in CMP_OPS):
+            cond = BinOp(">", cond, Const(0.0))
+        return If(cond, then, otherwise)
     if isinstance(node, UnOp):
         child = ensure_grammar(node.child, rng, ops, funcs, specials)
         if node.name not in funcs:
@@ -290,6 +384,10 @@ def point_mutation(rng: random.Random, tree: Node,
                 and not isinstance(right, Const)):
             right = _rand_exp(rng)
         new = BinOp(op, left, right)
+    elif isinstance(target, If):
+        # Swap the branches: the cheapest restructure of a fork (and the
+        # one that flips which half of the domain gets which formula)
+        new = If(target.cond, target.otherwise, target.then)
     elif isinstance(target, UnOp):
         if funcs:
             new = UnOp(rng.choice(funcs), target.child)

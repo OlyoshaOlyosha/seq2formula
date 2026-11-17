@@ -137,6 +137,10 @@ function astToLatex(ast) {
         return `\\operatorname{${ast.n}}\\left(${inner}\\right)`;
     }
   }
+  if (ast.t === "if") {
+    // piecewise fork: the cases environment draws its own left brace
+    return `\\begin{cases}${astToLatex(ast.a)} & \\text{если } ${astToLatex(ast.c)} \\\\ ${astToLatex(ast.b)} & \\text{иначе}\\end{cases}`;
+  }
   // binary op: fold a negative constant into the sign (n + -3 -> n - 3)
   const neg = ast.t === "+" || ast.t === "-" ? negativeConst(ast.r) : null;
   if (neg !== null) {
@@ -167,6 +171,10 @@ function astToLatex(ast) {
     }
     case "^":
       return `${isSimple(L) ? L : `\\left(${L}\\right)`}^{${R}}`;
+    case "<":
+      return `${L} \\lt ${R}`;
+    case ">":
+      return `${L} \\gt ${R}`;
   }
   return "?";
 }
@@ -2091,6 +2099,7 @@ const TOKEN_LABELS = {
   "+": "+", "-": "−", "*": "×", "/": "÷", "^": "xʸ", mod: "%",
   sqrt: "√", cbrt: "∛", fact: "!", abs: "|x|", floor: "⌊x⌋",
   sin: "sin", cos: "cos", tan: "tan", ln: "ln", pi: "π", e: "e",
+  if: "if", "<": "<", ">": ">",
 };
 
 /* T4 puzzles are only solvable with the right grammar features on; when

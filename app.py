@@ -41,13 +41,15 @@ from engine.curve import MAX_STROKES
 from engine.grammar import BINARY_OPS
 from engine.neuro import DEFAULT_CONSTS as DEFAULT_NEURO_CONSTS
 from engine.neuro import NeuroConfig, NeuroEngine
-from engine.nodes import special_value
+from engine.nodes import CMP_OPS, special_value
 
 # Grammar feature tokens the dashboard may send in RunRequest.ops: binary
-# operators, unary functions and special constants, one flat list — the
-# grouping into picker sections is purely a UI concern.
+# operators, unary functions, the if-fork chip and special constants, one
+# flat list — the grouping into picker sections is purely a UI concern.
 CONST_TOKENS = ("pi", "e")
-ALL_TOKENS = frozenset(BINARY_OPS) | frozenset(UNARY_FUNCS) | frozenset(CONST_TOKENS)
+IF_TOKEN = "if"  # noqa: S105  (grammar token, not a credential)
+ALL_TOKENS = (frozenset(BINARY_OPS) | frozenset(CMP_OPS)
+              | frozenset(UNARY_FUNCS) | frozenset(CONST_TOKENS) | {IF_TOKEN})
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -394,7 +396,12 @@ class RunManager:
         if bad:
             raise HTTPException(422, f"unknown grammar tokens: {bad}")
         ordered = tuple(dict.fromkeys(ops))  # dedupe, keep order
-        bin_ops = tuple(t for t in ordered if t in BINARY_OPS) or None
+        bin_ops = tuple(t for t in ordered if t in BINARY_OPS)
+        if IF_TOKEN in ordered:
+            # The if chip enables comparisons: the grammar draws piecewise
+            # forks whenever a comparison op is present in ops
+            bin_ops += CMP_OPS
+        bin_ops = bin_ops or None
         funcs = tuple(t for t in ordered if t in UNARY_FUNCS) or ()
         consts = tuple(t for t in ordered if t in CONST_TOKENS) or ()
         if bin_ops is None:
