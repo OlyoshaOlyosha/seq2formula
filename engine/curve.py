@@ -552,8 +552,22 @@ class CurveGP:
 
         stats = self._stats(scored)
 
+        # Fitness sharing: break clone armies of identical curves the
+        # same way the sequence engine breaks identical outputs.
+        keys = [_values_key(sc) if sc.xs is not None else () for _, sc in scored]
+        counts = Counter(keys)
+        for (genome, sc), key in zip(scored, keys, strict=True):
+            if key and counts[key] > 1:
+                sc.fitness -= (counts[key] - 1) * 0.001
+
+        scored.sort(key=lambda item: item[1].fitness, reverse=True)
+        self._memetic_refine(scored)
+
         # Track the most accurate genome (lowest error), not the fitness
-        # leader — the same no-regress rule as the sequence engine.
+        # leader — the same no-regress rule as the sequence engine. This
+        # runs AFTER memetic refinement: a refined variant can be the
+        # true best of the generation (and can even be the one that
+        # solves), and pre-refinement tracking silently dropped it.
         true_best_error = math.inf
         true_best = scored[0]
         for genome, sc in scored:
@@ -567,17 +581,6 @@ class CurveGP:
                 tuple(x for x, _ in true_best[0]),
                 tuple(y for _, y in true_best[0]),
                 true_best[1])
-
-        # Fitness sharing: break clone armies of identical curves the
-        # same way the sequence engine breaks identical outputs.
-        keys = [_values_key(sc) if sc.xs is not None else () for _, sc in scored]
-        counts = Counter(keys)
-        for (genome, sc), key in zip(scored, keys, strict=True):
-            if key and counts[key] > 1:
-                sc.fitness -= (counts[key] - 1) * 0.001
-
-        scored.sort(key=lambda item: item[1].fitness, reverse=True)
-        self._memetic_refine(scored)
 
         # Adaptive anti-stagnation shock, same semantics as GPEngine.
         if new_best:

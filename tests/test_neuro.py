@@ -32,7 +32,9 @@ def _pow_ok(node) -> bool:
     if isinstance(node, BinOp):
         if node.op == "^":
             from engine.nodes import Const as C
-            if not isinstance(node.left, C) and not isinstance(node.right, C):
+            from engine.nodes import Var as V
+            if not (isinstance(node.left, C) or isinstance(node.right, C)
+                    or isinstance(node.right, V)):
                 return False
         return _pow_ok(node.left) and _pow_ok(node.right)
     if hasattr(node, "child"):
@@ -243,3 +245,40 @@ def test_progressive_stage_is_deterministic() -> None:
                           round(res.best.score.fitness, 10)))
         runs.append(trace)
     assert runs[0] == runs[1]
+
+
+def test_expression_base_tokens_gate_and_sample() -> None:
+    """^en / ^nn unlock only on the piecewise stage (measured: on the
+    funcs stage they dilute the alphabet), don't exist in a funcs-less
+    config, and once unlocked the rollout can build (expr)^n and n^n."""
+    from engine.neuro import POW_EN, POW_NN, STAGE_BASE, STAGE_FUNCS, STAGE_PIECE
+    from engine.nodes import Var
+
+    plain = NeuroEngine([1.0, 2.0, 3.0], NeuroConfig())
+    assert POW_EN not in plain.tok_id and POW_NN not in plain.tok_id
+
+    seq = [1.0, 2.0, 5.0, 12.0, 29.0, 70.0]
+    eng = NeuroEngine(seq, NeuroConfig(seed=2, population=32,
+                                       allowed_funcs=("sqrt",)))
+    assert eng._legal_mask(5, 0, STAGE_BASE)[eng.tok_id[POW_EN]] == 0.0
+    assert eng._legal_mask(5, 0, STAGE_BASE)[eng.tok_id[POW_NN]] == 0.0
+    assert eng._legal_mask(5, 0, STAGE_FUNCS)[eng.tok_id[POW_EN]] == 0.0
+    assert eng._legal_mask(5, 0, STAGE_FUNCS)[eng.tok_id[POW_NN]] == 0.0
+    assert eng._legal_mask(5, 0, STAGE_PIECE)[eng.tok_id[POW_EN]] == 1.0
+    assert eng._legal_mask(5, 0, STAGE_PIECE)[eng.tok_id[POW_NN]] == 1.0
+
+    eng.stage = STAGE_PIECE
+    eng._enabled_ops = eng._stage_ops()
+    eng._enabled_funcs = eng._stage_funcs()
+    saw_en = saw_nn = False
+    for _ in range(400):
+        trace: list = []
+        node = eng._rollout_slot(eng.cfg.max_depth, 0, trace, last_id=0)
+        if isinstance(node, BinOp) and node.op == "^":
+            if isinstance(node.right, Var):
+                saw_en = True
+            if isinstance(node.left, Var) and isinstance(node.right, Var):
+                saw_nn = True
+        if saw_en and saw_nn:
+            break
+    assert saw_en and saw_nn

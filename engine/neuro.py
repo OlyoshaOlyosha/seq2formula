@@ -19,9 +19,11 @@ works; DQN adds machinery the problem does not need, and imitation of GP
 solutions would contradict the project's point (the engine must find
 formulas itself). Everything runs on numpy — no ML dependency.
 
-Design note on `^`: the grammar forbids n^n, so the vocabulary has two
-dedicated power tokens, n^k and k^n, each of which opens exactly one
-expression slot plus one constant-only decision for the exponent/base.
+Design note on `^`: the grammar requires the exponent to be a constant
+or exactly n, so the vocabulary has dedicated power tokens: n^k and
+k^n (one expression slot plus one constant-only decision), ^en
+((expr)^n — one expression slot for the base, exponent is n) and ^nn
+(bare n^n, no slots at all — the smallest node the vocab can build).
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ import numpy as np
 
 from .fitness import INVALID_FITNESS, Score, score_candidate
 from .gp import Best, GenerationResult
-from .grammar import EXP_RANGE, random_path, replace_subtree, subtree_at
+from .grammar import EXP_RANGE, _pow_legal, random_path, replace_subtree, subtree_at
 from .nodes import CMP_OPS, BinOp, Const, If, Neg, Node, UnOp, Var, special_value
 
 # Vocabulary: constants get their own tokens (the network must learn WHICH
@@ -51,6 +53,7 @@ DEFAULT_CONSTS = (
 EXP_BASE_CONSTS = (-5.0, -3.0, -2.0, -1.0, 0.5, 1.5, 2.0, 3.0, 4.0, 5.0,
                    10.0)
 POW_NK, POW_KN = "^nk", "^kn"
+POW_EN, POW_NN = "^en", "^nn"
 NEG_TOKEN = "neg"  # noqa: S105  (grammar token, not a credential)
 IF_TOKEN = "if"  # noqa: S105  (grammar token, not a credential)
 
@@ -107,8 +110,7 @@ def _mutated_neighbor(tree: Node, rng: random.Random,
             return None
         op = rng.choice(others)
         left, right = target.left, target.right
-        if op == "^" and not isinstance(left, Const) \
-                and not isinstance(right, Const):
+        if op == "^" and not _pow_legal(left, right):
             right = Const(float(rng.randint(*EXP_RANGE)))
         new = BinOp(op, left, right)
     elif isinstance(target, If):
@@ -287,13 +289,19 @@ class NeuroEngine:
         self.nprng = np.random.default_rng(self.cfg.seed)
 
         # Token vocabulary: fixed order = token ids. Power tokens encode
-        # the n^n ban structurally; specials (π/e) reuse the const slots.
+        # the ^ exponent rule structurally; specials (π/e) reuse the
+        # const slots.
         self.consts = tuple(dict.fromkeys(self.cfg.allowed_consts))
         self.funcs = tuple(self.cfg.allowed_funcs)
         self.terminal_tokens = ["var"] + [f"c{c:g}" for c in self.consts]
         self.op_tokens = [o for o in self.cfg.allowed_ops if o != "^"]
         self.vocab = (self.terminal_tokens + self.op_tokens
                       + list(self.funcs) + [NEG_TOKEN, POW_NK, POW_KN])
+        if self.funcs:
+            # (expr)^n / n^n exist only when functions do: without sqrt
+            # & co these two tokens are dead weight that dilutes the base
+            # alphabet (measured: T2 minimal 13/13 -> 12/13)
+            self.vocab += [POW_EN, POW_NN]
         # Piecewise forks: reachable only through comparisons (the cond is
         # always drawn as one), so the if token exists iff a comparison
         # op is in the allowed set
@@ -317,6 +325,12 @@ class NeuroEngine:
         for tok in self.vocab:
             if tok in self.funcs:
                 self._tok_stage[self.tok_id[tok]] = STAGE_FUNCS
+            elif tok in (POW_EN, POW_NN):
+                # (expr)^n / n^n: unlock on the piecewise stage, the LAST
+                # widening. Measured: on the funcs stage they diluted the
+                # alphabet (square-over-two 2/3 -> 1/3). In a funcs-less
+                # config the tokens don't exist at all (vocab gate above).
+                self._tok_stage[self.tok_id[tok]] = STAGE_PIECE
             elif tok == IF_TOKEN or tok in CMP_OPS:
                 self._tok_stage[self.tok_id[tok]] = STAGE_PIECE
             elif tok.startswith("c") \
@@ -411,6 +425,9 @@ class NeuroEngine:
                 if "^" in self.cfg.allowed_ops:
                     mask[self.tok_id[POW_NK]] = 1.0
                     mask[self.tok_id[POW_KN]] = 1.0
+                    if self.funcs:  # ^en/^nn exist only with functions
+                        mask[self.tok_id[POW_EN]] = 1.0
+                        mask[self.tok_id[POW_NN]] = 1.0
                 if self.if_enabled:
                     # fork at budget 2: cond children and both branches all
                     # resolve to terminals — the shallowest legal piecewise
@@ -474,6 +491,14 @@ class NeuroEngine:
             if tok == POW_NK:
                 return BinOp("^", sub, const)
             return BinOp("^", const, sub)
+        if tok == POW_EN:
+            # (expr)^n: one expression slot for the base, the exponent
+            # is n itself — the Pell/Lucas structural family
+            sub = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, aid)
+            return BinOp("^", sub, Var())
+        if tok == POW_NN:
+            # bare n^n: zero slots, the cheapest possible power node
+            return BinOp("^", Var(), Var())
         # plain binary op: two expression slots, left then right
         left = self._rollout_slot(budget - 1, SLOT_LEFT, trace, aid)
         right = self._rollout_slot(budget - 1, SLOT_RIGHT, trace, aid)

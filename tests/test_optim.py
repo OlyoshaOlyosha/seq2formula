@@ -135,8 +135,9 @@ def test_crossover_offspring_respect_power_rule():
 
 def _power_ok(node: Node) -> bool:
     if isinstance(node, BinOp):
-        if node.op == "^" and not isinstance(node.left, Const) \
-                and not isinstance(node.right, Const):
+        if node.op == "^" and not (isinstance(node.left, Const)
+                                   or isinstance(node.right, Const)
+                                   or isinstance(node.right, Var)):
             return False
         return _power_ok(node.left) and _power_ok(node.right)
     if isinstance(node, (Neg, UnOp)):

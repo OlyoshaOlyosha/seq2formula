@@ -159,6 +159,8 @@ function tokLabel(tok) {
   if (tok === "neg") return "-()";
   if (tok === "^nk") return "n^k";
   if (tok === "^kn") return "k^n";
+  if (tok === "^en") return "(…)^n";
+  if (tok === "^nn") return "n^n";
   // const tokens are exactly "c" + a number: "c2", "c-3", "c0.5";
   // anything else that merely starts with c (cos, cbrt) is a function
   if (/^c[-0-9.]/.test(tok)) return tok.slice(1);

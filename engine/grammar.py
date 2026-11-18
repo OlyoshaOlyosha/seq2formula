@@ -2,10 +2,12 @@
 
 Grammar v1: terminals are n and numeric constants (integers plus a few
 halves for the rational puzzles); binary ops are + - * / ^ mod. Power
-needs a constant on at least one side: a constant exponent gives n^2-style
-polynomials, a constant base gives 2^n-style exponentials; n^n stays
-forbidden. Every operator enforces the depth limit and repairs ^ nodes
-that lost their constant through a crossover splice.
+constrains the EXPONENT: a constant exponent gives n^2-style polynomials
+(and k^const forms for k^n puzzles), an exponent of exactly n gives the
+(expr)^n family — Pell/Lucas bases — and a bare Var base there is n^n.
+Still forbidden: an arbitrary expression as the exponent (n^(n+1),
+2^99999). Every operator enforces the depth limit and repairs ^ nodes
+whose exponent was damaged through a crossover splice.
 
 Grammar v2 additions: unary functions (UnOp nodes — sqrt, cbrt, fact,
 abs, sin, cos, tan, ln) and the special constants π / e. Functions draw
@@ -73,6 +75,15 @@ def _if_enabled(ops: tuple[str, ...]) -> bool:
     """Comparisons in the ops tuple are what makes If legal (the cond
     is always drawn as a comparison)."""
     return any(op in CMP_OPS for op in ops)
+
+
+def _pow_legal(left: Node, right: Node) -> bool:
+    """^ legality: a constant on either side (n^k / k^(expr)) or an
+    exponent of exactly n ((expr)^n — Pell/Lucas — including the bare
+    n^n). Still banned: an arbitrary base with an arbitrary non-n
+    exponent, the (n+n)^(n+n) monster source."""
+    return (isinstance(left, Const) or isinstance(right, Const)
+            or isinstance(right, Var))
 
 
 def _rand_const(rng: random.Random, specials: tuple[float, ...] = ()) -> Const:
@@ -143,12 +154,17 @@ def random_tree(rng: random.Random, max_depth: int, method: str = "grow",
         return If(cond, then, otherwise)
     op = rng.choice(ops)
     if op == "^":
-        if rng.random() < 0.5:  # n^k form: constant exponent
+        r = rng.random()
+        if r < 0.45:  # n^k form: constant exponent
             left = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
             right = _rand_exp(rng)
-        else:  # k^n form: constant base
+        elif r < 0.90:  # k^n form: constant base
             left = _rand_base(rng)
             right = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
+        else:  # (expr)^n form: exponent is n itself (Pell/Lucas family);
+              # a bare Var base here is the n^n family, so it comes free
+            left = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
+            right = VAR
         return BinOp(op, left, right)
     left = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
     right = random_tree(rng, max_depth - 1, method, ops, funcs, specials)
@@ -255,12 +271,11 @@ def _repair_splice(node: Node, path: tuple[int, ...], rng: random.Random,
         else:
             left = node.left
             right = _repair_splice(node.right, rest, rng, ops)
-        if node.op == "^" and not isinstance(left, Const) \
-                and not isinstance(right, Const):
-            if "^" in ops:
-                right = _rand_exp(rng)
-            else:
+        if node.op == "^":
+            if "^" not in ops:
                 return BinOp(rng.choice(ops), left, right)
+            if not _pow_legal(left, right):
+                right = _rand_exp(rng)
         return BinOp(node.op, left, right)
     if isinstance(node, If):
         cond = _repair_splice(node.cond, rest, rng, ops) if step == 0 \
@@ -286,22 +301,22 @@ def ensure_grammar(node: Node, rng: random.Random,
                    ops: tuple[str, ...] = BINARY_OPS,
                    funcs: tuple[str, ...] = (),
                    specials: tuple[float, ...] = ()) -> Node:
-    """Post-crossover repair: ^ must keep a constant on one side, and a
-    function node whose function got disabled (or an unknown one from a
-    corrupt splice) strips to its argument. A splice can leave n*n under
-    a ^; re-roll a constant exponent rather than rejecting the child
-    (keeps operator flow simple). When ^ is disabled entirely, a bare ^
+    """Post-crossover repair: ^ must keep its exponent a constant or
+    exactly n, and a function node whose function got disabled (or an
+    unknown one from a corrupt splice) strips to its argument. A splice
+    can leave an arbitrary expression as a ^ exponent; re-roll a constant
+    exponent rather than rejecting the child (keeps operator flow
+    simple). When ^ is disabled entirely, a bare ^
     swaps to an allowed operator. Comparisons disabled: a comparison node
     strips to its left side and an If fork keeps just the then branch."""
     if isinstance(node, BinOp):
         left = ensure_grammar(node.left, rng, ops, funcs, specials)
         right = ensure_grammar(node.right, rng, ops, funcs, specials)
-        if node.op == "^" and not isinstance(left, Const) \
-                and not isinstance(right, Const):
-            if "^" in ops:
-                right = _rand_exp(rng)
-            else:
+        if node.op == "^":
+            if "^" not in ops:
                 return BinOp(rng.choice(ops), left, right)
+            if not _pow_legal(left, right):
+                right = _rand_exp(rng)
         if node.op in CMP_OPS and node.op not in ops:
             return left  # strip the comparison, keep the left operand
         return BinOp(node.op, left, right)
@@ -380,8 +395,7 @@ def point_mutation(rng: random.Random, tree: Node,
     elif isinstance(target, BinOp):
         op = rng.choice(ops)
         left, right = target.left, target.right
-        if (op == "^" and not isinstance(left, Const)
-                and not isinstance(right, Const)):
+        if op == "^" and not _pow_legal(left, right):
             right = _rand_exp(rng)
         new = BinOp(op, left, right)
     elif isinstance(target, If):
@@ -431,9 +445,12 @@ def root_mutation(rng: random.Random, tree: Node,
         return UnOp(name, tree)
     op = rng.choice(ops)
     if op == "^":
-        if rng.random() < 0.5:
+        r = rng.random()
+        if r < 0.4:
             return BinOp(op, tree, _rand_exp(rng))
-        return BinOp(op, _rand_base(rng), tree)
+        if r < 0.8:
+            return BinOp(op, _rand_base(rng), tree)
+        return BinOp(op, tree, VAR)  # (expr)^n: Pell/Lucas family
     other = random_tree(rng, 2, "grow", ops, funcs, specials)
     if rng.random() < 0.5:
         return BinOp(op, tree, other)
