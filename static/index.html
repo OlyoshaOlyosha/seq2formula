@@ -427,10 +427,12 @@
         <h2 class="panel-title">Галерея кривых</h2>
         <span class="panel-meta">завершённые прогоны; клик по строке — вернуть рисунок на холст</span>
       </div>
-      <table class="list-table" id="curveTable">
+      <div class="table-scroll">
+        <table class="list-table" id="curveTable">
         <thead><tr><th>Дата</th><th>Формулы</th><th class="num">Ошибка</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
         <tbody id="curveRows"></tbody>
       </table>
+      </div>
     </section>
   </section>
 
@@ -474,27 +476,37 @@
         </div>
       </div>
       <div class="tab-body" id="tabBody">
-        <table class="list-table" id="libraryTable">
+        <div class="table-scroll">
+          <table class="list-table" id="libraryTable">
           <thead><tr><th>Последовательность</th><th>Эталон</th><th>Лучший результат</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
           <tbody id="libraryRows"></tbody>
         </table>
-        <table class="list-table" id="shapeTable" hidden>
+        </div>
+        <div class="table-scroll">
+          <table class="list-table" id="shapeTable" hidden>
           <thead><tr><th>Фигура</th><th>Лучшие формулы</th><th class="num">Ошибка</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
           <tbody id="shapeRows"></tbody>
         </table>
-        <table class="list-table" id="mySeqTable" hidden>
+        </div>
+        <div class="table-scroll">
+          <table class="list-table" id="mySeqTable" hidden>
           <thead><tr><th>Последовательность</th><th>Мой эталон</th><th>Лучший результат</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
           <tbody id="mySeqRows"></tbody>
         </table>
-        <table class="list-table" id="curioTable" hidden>
+        </div>
+        <div class="table-scroll">
+          <table class="list-table" id="curioTable" hidden>
           <thead><tr><th>Последовательность</th><th>Формула</th><th class="num">Размер</th><th class="num">Ошибка</th><th class="num">Поколение</th></tr></thead>
           <tbody id="curioRows"></tbody>
         </table>
-        <table class="list-table" id="curveCurioTable" hidden>
+        </div>
+        <div class="table-scroll">
+          <table class="list-table" id="curveCurioTable" hidden>
           <caption class="field-hint" id="curveCurioCaption"></caption>
           <thead><tr><th>Фигура</th><th>Кривые</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
           <tbody id="curveCurioRows"></tbody>
         </table>
+        </div>
       </div>
     </section>
   </section>

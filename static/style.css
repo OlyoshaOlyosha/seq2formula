@@ -175,6 +175,11 @@ body {
   margin: 0 auto;
   padding: var(--pad) var(--pad) 48px;
   display: grid;
+  /* minmax(0, 1fr): an auto track sizes to the widest min-content child and
+     pushes the page into horizontal scroll (curves formulas, chart canvases);
+     with minmax(0, ...) the track fills the viewport and wide children are
+     handled by their own containers */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--gap);
 }
 
@@ -837,7 +842,8 @@ input[type="range"] {
 
 .terms-wrap { overflow-x: auto; }
 
-.terms-table, .list-table {
+.terms-table, .table-scroll { overflow-x: auto; }
+.list-table {
   border-collapse: collapse;
   width: 100%;
   font-size: var(--fs-body);
@@ -1113,7 +1119,7 @@ input[type="range"] {
 /* ===== Curves mode («Кривые») ===== */
 .curves-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 480px) 1fr;
+  grid-template-columns: minmax(320px, 480px) minmax(0, 1fr);
   gap: var(--gap);
   margin-bottom: var(--gap);
   align-items: start;
@@ -1134,6 +1140,7 @@ input[type="range"] {
 }
 
 .curve-live-panel { min-width: 0; }
+.curve-draw-panel, .curve-history-panel, .pane { min-width: 0; }
 
 .curve-hero { margin-bottom: 12px; }
 .curve-hero .hero-formula .katex { font-size: 1.3em; }
