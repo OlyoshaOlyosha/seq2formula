@@ -37,6 +37,14 @@
                  background: var(--amber-tint); color: var(--amber); border: 1px solid #4a3d1e; }
   .badge-solved { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
                   background: var(--positive-dim); color: var(--positive); border: 1px solid #1f4a2e; }
+  .badge-run { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+               background: var(--accent-tint); color: var(--accent); border: 1px solid #3a3d5e; }
+  .badge-off { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+               background: var(--amber-tint); color: var(--amber); border: 1px solid #4a3d1e; }
+  .conn { font-size: var(--fs-small); color: var(--faint); display: inline-flex; align-items: center; gap: 6px; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--positive); }
+  .conn.bad .conn-dot { background: var(--negative); }
+  .conn.bad { color: var(--negative); }
   .stat-line { display: flex; justify-content: space-between; font-size: var(--fs-small); color: var(--muted); padding: 3px 0; }
   .stat-line b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
 </style>
@@ -46,6 +54,7 @@
   <div class="neuro-head">
     <h1 style="margin:0;font-size:var(--fs-title);">Нейро-движок</h1>
     <a href="/">← Поиск</a>
+    <span class="conn" id="conn"><span class="conn-dot"></span><span id="connText">на связи</span></span>
     <span id="statusBadge" class="badge-solved" hidden></span>
     <span id="shockBadge" class="badge-shock" hidden>встряска</span>
   </div>
@@ -109,8 +118,8 @@
       <div class="card">
         <h2>Награда за поколение
           <span style="font-weight:400;font-size:12px;color:var(--muted)">
-            <span style="color:#4ec9b0">— средняя</span> ·
-            <span style="color:#8b93f8">— лучшая в батче</span></span></h2>
+            <span style="color:var(--teal)">— средняя</span> ·
+            <span style="color:var(--accent)">— лучшая в батче</span></span></h2>
         <div class="chart" id="chartReward"></div>
       </div>
       <div class="card">
@@ -120,8 +129,8 @@
       <div class="card">
         <h2>Энтропия и валидность
           <span style="font-weight:400;font-size:12px;color:var(--muted)">
-            <span style="color:#8b93f8">— энтропия</span> ·
-            <span style="color:#3fc07a">— доля валидных</span></span></h2>
+            <span style="color:var(--accent)">— энтропия</span> ·
+            <span style="color:var(--positive)">— доля валидных</span></span></h2>
         <div class="chart" id="chartEntropy"></div>
       </div>
     </div>

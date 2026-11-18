@@ -229,17 +229,27 @@ function renderStatus(snap) {
   if (snap.solved) {
     badge.textContent = "решено";
     badge.className = "badge-solved";
+  } else if (snap.status === "running") {
+    badge.textContent = "идёт обучение";
+    badge.className = "badge-run";
   } else {
-    badge.textContent = snap.status === "running" ? "идёт обучение" : "пауза";
-    badge.className = "badge-shock";
+    badge.textContent = "пауза";
+    badge.className = "badge-shock";  // amber: paused matches the main chip
   }
 }
 
 /* ---------- websocket ---------- */
 
 let ws;
+function setConn(ok) {
+  const el = $("conn");
+  if (el) el.classList.toggle("bad", !ok);
+  $("connText").textContent = ok ? "на связи" : "нет связи с сервером";
+}
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => setConn(true);
+  ws.onclose = () => { setConn(false); setTimeout(connect, 1000); };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "status") { applySnapshot(msg); return; }
@@ -258,7 +268,6 @@ function connect() {
     $("shockBadge").hidden = !msg.shock;
     if (msg.solved_now) flashSolved();
   };
-  ws.onclose = () => setTimeout(connect, 1000);
 }
 
 function applySnapshot(snap) {
@@ -280,7 +289,7 @@ function applySnapshot(snap) {
 
 let flashTimer;
 function flashSolved() {
-  document.title = "★ решено — seq2formula";
+  document.title = "Решено — seq2formula";
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { document.title = "seq2formula — Нейро"; }, 4000);
 }

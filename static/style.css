@@ -165,7 +165,7 @@ body {
 .chip.run { background: var(--accent-tint); color: var(--accent); }
 .chip.paused { background: var(--amber-tint); color: var(--amber); }
 .chip.solved { background: var(--positive-dim); color: var(--positive); }
-.chip.finished { background: var(--active); color: var(--faint); }
+.chip.finished { background: var(--active); color: var(--text); }
 .chip.error { background: var(--amber-tint); color: var(--amber); }
 
 /* ---------- canvas ---------- */
@@ -232,7 +232,8 @@ body {
 
 .input:hover { border-color: #4a4a52; }
 
-.input:focus { outline: none; border-color: var(--accent); }
+.input:focus { border-color: var(--accent);
+  outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* custom dropdown for puzzles */
 .field-puzzle { position: relative; }
@@ -288,25 +289,12 @@ body {
 }
 .puzzle-filter-select {
   height: 28px;
-  font-size: 11px;
+  font-size: 12px;
   padding: 0 6px;
   flex: 1;
   min-width: 0;
   background-image: none; /* remove custom arrow for these compact ones */
   cursor: pointer;
-}
-.puzzle-search-wrap {
-  padding: 8px;
-  position: sticky;
-  top: 0;
-  background: var(--surface);
-  z-index: 10;
-  border-bottom: 1px solid var(--border);
-}
-.puzzle-search {
-  width: 100%;
-  height: 30px;
-  font-size: var(--fs-small);
 }
 .modern-select-item {
   padding: 8px 12px;
@@ -348,7 +336,7 @@ body {
   transition: opacity 150ms;
 }
 
-.kpi:hover::after, .kpi:focus-within::after { opacity: 1; }
+.kpi:hover::after { opacity: 1; }
 
 .btn {
   display: inline-flex;
@@ -621,12 +609,6 @@ input[type="range"] {
 .hero-formula .katex-display > .katex {
   text-align: left !important;
   display: block !important;
-}
-
-/* Force KaTeX to align left, overriding its internal flexbox centering */
-.hero-formula .katex-display > .katex {
-  text-align: left;
-  display: inline-block;
 }
 
 .hero-formula:hover { background: rgba(139, 147, 248, 0.08); }
@@ -1007,6 +989,20 @@ input[type="range"] {
 
 /* solved banner */
 
+.error-note {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--amber-tint);
+  color: var(--amber);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.error-note[hidden] { display: none; }
+.error-note:not([hidden]) { display: flex; }
 .solved-note {
   display: none;
   margin-top: 10px;

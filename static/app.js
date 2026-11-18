@@ -1934,10 +1934,10 @@ async function loadPuzzles() {
         <option value="solved">Решённые</option>
       </select>
       <select id="filterDiff" class="input puzzle-filter-select">
-        <option value="all" style="color: var(--text)">⚪ Любая</option>
-        <option value="easy" style="color: var(--positive)">🟢 Легко</option>
-        <option value="medium" style="color: var(--amber)">🟡 Средне</option>
-        <option value="hard" style="color: var(--negative)">🔴 Сложно</option>
+        <option value="all" style="color: var(--text)">Любая</option>
+        <option value="easy" style="color: var(--positive)">Легко</option>
+        <option value="medium" style="color: var(--amber)">Средне</option>
+        <option value="hard" style="color: var(--negative)">Сложно</option>
       </select>
     </div>
   `;
@@ -2236,7 +2236,7 @@ async function loadLibrary() {
         
         const badge = document.createElement("span");
         badge.className = "ref-badge";
-        badge.textContent = " ★";
+        badge.textContent = "короче";
         badge.title = `Короче эталона (${h.size} против ${refSize})`;
         result.appendChild(badge);
       }
@@ -2715,7 +2715,14 @@ async function startRun(event) {
 
 function alertErr(message) {
   setChip("ошибка", "error");
-  $("liveChip").title = message;
+  // inline, dismissible — a hover-only chip title made failures invisible
+  for (const id of ["errorNote", "curveErrorNote"]) {
+    const el = $(id);
+    if (!el) continue;
+    el.textContent = message + "  (нажмите, чтобы скрыть)";
+    el.hidden = false;
+    el.onclick = () => { el.hidden = true; };
+  }
   console.error(message);
 }
 
