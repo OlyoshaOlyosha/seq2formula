@@ -2,6 +2,7 @@
 
 **English** · [Русский](README.ru.md)
 
+[![Release](https://img.shields.io/github/v/release/OlyoshaOlyosha/seq2formula-009688?logo=github&logoColor=white)](https://github.com/OlyoshaOlyosha/seq2formula/releases)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-148%20passed-3FC07A)
