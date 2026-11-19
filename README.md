@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-140%20passed-3FC07A)
+![Tests](https://img.shields.io/badge/tests-148%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 **Watch evolution discover the mathematical formulas behind number sequences.**
@@ -21,9 +21,10 @@ Everything runs locally on your machine. No internet access, no telemetry, and n
 
 - **Live Search Dashboard**: Watch formulas evolve in real-time with detailed charts for fitness, error, and population diversity.
 - **Curve Mode**: The same engine fits parametric formulas to 2D point sets — draw a circle, a spiral, a wave or even a multi-stroke smiley, and watch the search match your shape on a canvas.
-- **Neuro Engine (Stage 2)**: A reinforcement-learning alternative to the genetic search — a small neural policy (numpy only) assembles formulas token by token and trains live, with its own `/neuro` page full of learning curves, policy entropy and "what the network is thinking" token bars. A memetic refinement pass (local algebraic tweaks of the top formulas) lifted the hard tier to 11/13 puzzles.
+- **Neuro Engine (Stage 2)**: A reinforcement-learning alternative to the genetic search — a small neural policy (numpy only) assembles formulas token by token and trains live, with its own `/neuro` page full of learning curves, policy entropy and "what the network is thinking" token bars. Power tokens with expression bases and bare `n^n`, plus a memetic refinement pass (local algebraic tweaks of the top formulas), lifted the hard tier to 13/13 puzzles.
 - **Autopilot (Batch Mode)**: Queue up the entire library and let the engine solve puzzles one by one in the background.
-- **Advanced Math**: The engine supports basic arithmetic, roots, factorials, floor, trigonometry (`sin`, `cos`), logarithms, constants like π and e, and an optional piecewise `if` fork (comparisons as 0/1 values, rendered as a cases expression).
+- **Advanced Math**: The engine supports basic arithmetic, roots, factorials, floor, trigonometry (`sin`, `cos`), logarithms, constants like π and e, exponentiation with a safety rule (powers are only built from a constant base, a constant exponent, or `n` — no runaway `2^99999`), and an optional piecewise `if` fork (comparisons as 0/1 values, rendered as a cases expression).
+- **Bilingual UI**: English by default (auto-detected from the browser), Russian included; the language is switched in Settings.
 - **66 Built-in Sequences**: A curated library of puzzles ranging from simple linear progressions to famous sequences like Fibonacci and Catalan numbers.
 - **Custom Sequences**: Input your own numbers, specify a reference formula, and watch the engine find it.
 - **Reproducibility**: Enter a "seed" number to replay the exact same evolutionary search, or leave it blank for a fresh random run.
@@ -39,7 +40,7 @@ Everything runs locally on your machine. No internet access, no telemetry, and n
 The dashboard is built to be watched. The live view shows the best current formula rendered in beautiful typography, a top-5 leaderboard, and a live event feed. A mini-chart plots the found formula directly against your target sequence. 
 The Results tab tracks your history, maintains a "Hall of Fame" of the shortest formulas ever found, and collects "Curiosities" (absurd, near-miss formulas). You can pause, step through generation-by-generation, or accelerate the search at any time.
 
-The «Кривые» tab (curve mode) streams the same kind of statistics while the engine fits a formula curve to a target shape drawn on canvas — with a snap grid, eraser, stroke smoothing, server-side saved drawings (they survive any browser) and a gallery of near-miss "curve curiosities". Both modes can replay the search: the sequence hero steps through every champion formula the run produced, and the curve tab animates the found formula as if a pen were drawing it. The «Нейро» tab opens the standalone neuro training page: reward and error curves, policy entropy, token probability bars and the best formula found so far, rendered with KaTeX.
+The Curve tab streams the same kind of statistics while the engine fits a formula curve to a target shape drawn on canvas — with a snap grid, eraser, stroke smoothing, server-side saved drawings (they survive any browser) and a gallery of near-miss "curve curiosities". Both modes can replay the search: the sequence hero steps through every champion formula the run produced, and the curve tab animates the found formula as if a pen were drawing it. The Neuro tab opens the standalone neuro training page: reward and error curves, policy entropy, token probability bars and the best formula found so far, rendered with KaTeX.
 
 ## Getting started
 
@@ -95,6 +96,6 @@ Experimental, in continuous development.
 
 ## Notes
 
-- The dashboard UI is Russian — the project is developed for personal use
-  first.
+- The dashboard is bilingual: English canonical, Russian translation —
+  the project is developed for personal use first.
 - No license yet; the decision is deliberately deferred.
