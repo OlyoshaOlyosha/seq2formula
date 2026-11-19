@@ -22,7 +22,7 @@ const state = {
   lastLoggedBest: null,
   lastRunSolved: false,
   ops: new Set(["+", "-", "*", "/", "^"]),  // enabled binary operators
-  settings: null,          // engine knobs from /api/settings (Настройки tab)
+  settings: null,          // engine knobs from /api/settings (Settings tab)
   settingDefaults: null,
   lastTopUpdate: 0,        // throttle the top-10 list (100 gen/s is unreadable)
   lastLogGen: null,        // throttle the event feed
@@ -327,7 +327,7 @@ function makeCharts() {
                       values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
     [[], [], []], $("chartCurveError"));
 
-  // curve mode: full stat parity with Поиск
+  // curve mode: full stat parity with Search
   state.charts.curveFitness = new uPlot({ ...common }, [[], [], []],
     $("chartCurveFitness"));
 
@@ -568,8 +568,8 @@ function updateHeroChart(values) {
 function updateEvoBtn() {
   const btn = $("evoBtn");
   btn.hidden = state.champions.length < 2;
-  btn.textContent = state.evoPlaying ? "Stop"
-    : `Эволюция (${state.champions.length})`;
+  btn.textContent = state.evoPlaying ? i18n.t("Stop")
+    : i18n.t("Evolution ({0})", state.champions.length);
 }
 
 function stopEvolutionPlayback(silent) {
@@ -607,7 +607,7 @@ function playEvolution() {
     renderKatex($("bestFormula"), astToLatex(ch.ast), true);
     updateHeroChart(ch.values);
     $("heroLabel").textContent =
-      `Эволюция ${i + 1}/${champs.length} · пок. ${ch.gen}`
+      i18n.t("Evolution {0}/{1} · gen. {2}", i + 1, champs.length, ch.gen)
       + (ch.error === null || ch.error === undefined ? "" : ` · ${fmtPercent(ch.error)}`);
     i += 1;
     if (i >= champs.length) stopEvolutionPlayback(false);
@@ -692,7 +692,7 @@ function renderTop(top) {
     
     const meta = document.createElement("span");
     meta.className = "race-meta num";
-    meta.textContent = `fit ${fmtNum(item.fitness)} · размер ${item.size}`;
+    meta.textContent = i18n.t("fit {0} · size {1}", fmtNum(item.fitness), item.size);
     meta.title = "Fitness = 1 - error - size_penalty. Closer to 1.0 is better.";
     li.appendChild(meta);
     list.appendChild(li);
@@ -763,7 +763,7 @@ function updateRaceLog(msg) {
     pushLogEntry({ pre: "exact match found", cls: "log-solved" });
   } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
     pushLogEntry({
-      pre: "shrinking: a shorter formula —", text: `размер ${msg.best.size}`,
+      pre: i18n.t("shrinking: a shorter formula —"), text: i18n.t("size {0}", msg.best.size),
       cls: "log-shrink",
     });
   }
@@ -774,7 +774,7 @@ function updateRaceLog(msg) {
     if (!state.lastLogGen || msg.gen - state.lastLogGen >= 10) {
       pushLogEntry({
         pre: "new best:", latex: astToLatex(msg.best.ast),
-        text: `ошибка ${fmtPercent(msg.best.error)}`,
+        text: i18n.t("error {0}", fmtPercent(msg.best.error)),
       });
       state.lastLogGen = msg.gen;
     }
@@ -849,14 +849,16 @@ function applySolved(msg) {
   }
   pushLogEntry({
     pre: "solved:", latex: msg.formula ? astToLatex(msg.formula) : null,
-    text: `${msg.generations} поколений, ${fmtTime(msg.time_s)}`,
+    text: i18n.t("{0} generations, {1}", msg.generations, fmtTime(msg.time_s)),
     cls: "log-solved",
   });
   if (msg.formula) {
     renderKatex($("bestFormula"), astToLatex(msg.formula), true);
   }
   if (msg.formula_text) state.lastFormulaText = msg.formula_text;
-  const parts = [`Решено за ${msg.generations} поколений`];
+  const parts = [msg.generations === 1
+    ? i18n.t("Solved in 1 generation")
+    : i18n.t("Solved in {0} generations", msg.generations)];
   if (msg.time_s !== null) parts.push(fmtTime(msg.time_s));
   const note = $("solvedNote");
   note.classList.add("show");
@@ -954,7 +956,7 @@ function applyStatusMsg(msg) {
   }
 }
 
-/* ---------- curve mode («Кривые») ---------- */
+/* ---------- curve mode ---------- */
 
 /* Mirror of engine/curve.py SOLVE_ERROR: "solved" = mean two-sided
    distance below 2% of the unit square. */
@@ -1005,7 +1007,7 @@ function alongPath(vertices, n) {
 }
 
 /* One-stroke shape presets, same idea as the puzzle library in
-   «Результаты» but for curves. Coordinates: unit square, y down. */
+   Results but for curves. Coordinates: unit square, y down. */
 const CURVE_PRESETS = [
   { name: "Line", pts: alongPath([{ x: 0.12, y: 0.5 }, { x: 0.88, y: 0.5 }], 30) },
   { name: "Angle", pts: alongPath([{ x: 0.2, y: 0.15 }, { x: 0.2, y: 0.85 },
@@ -1181,11 +1183,11 @@ function resampleStroke(raw) {
 async function loadSavedDrawings() {
   const data = await api("/api/drawings");
   const sel = $("curveMySel");
-  sel.innerHTML = '<option value="">— загрузить фигуру —</option>';
+  sel.innerHTML = `<option value="">${i18n.t("— load a shape —")}</option>`;
   for (const d of data.drawings) {
     const opt = document.createElement("option");
     opt.value = String(d.id);
-    opt.textContent = `${d.name} (${d.strokes.length} штрихов)`;
+    opt.textContent = i18n.t("{0} ({1} strokes)", d.name, d.strokes.length);
     opt.dataset.strokes = JSON.stringify(d.strokes);
     sel.appendChild(opt);
   }
@@ -1284,7 +1286,7 @@ function initCurveCanvas() {
       return;
     }
     if (state.curveStrokes.length >= MAX_CURVE_STROKES) {
-      alertErr(`максимум ${MAX_CURVE_STROKES} штрихов`);
+      alertErr(i18n.t("maximum of {0} strokes", MAX_CURVE_STROKES));
       return;
     }
     canvas.setPointerCapture(e.pointerId);
@@ -1321,7 +1323,7 @@ function initCurveCanvas() {
     state.curveStroke = [];
     if (totalCurvePoints() + pts.length > MAX_CURVE_POINTS) {
       state.curveStrokes.pop();  // drop the stroke we opened
-      alertErr(`максимум ${MAX_CURVE_POINTS} точек цели`);
+      alertErr(i18n.t("maximum of {0} target points", MAX_CURVE_POINTS));
     } else {
       state.curveStrokes[state.curveStrokes.length - 1] = pts;
       state.curvePreset = null;  // hand-drawn now, not a preset
@@ -1500,7 +1502,7 @@ function applyCurveGen(msg) {
     renderCurveHero(msg.best);
   }
   const sub = [`fitness ${fmtNum(msg.best.fitness)}`];
-  if (msg.best.solved) sub.push('<span class="ok">порог взят</span>');
+  if (msg.best.solved) sub.push(`<span class="ok">${i18n.t("threshold beaten")}</span>`);
   $("curveSub").innerHTML = sub.join(" · ");
 
   // top-5 pairs: throttled like the sequence race list
@@ -1526,7 +1528,7 @@ function renderCurveHero(best) {
     if (multi) {
       const label = document.createElement("span");
       label.className = "curve-stroke-label";
-      label.textContent = `Штрих ${k + 1}:`;
+      label.textContent = i18n.t("Stroke {0}:", k + 1);
       box.appendChild(label);
     }
     const fx = document.createElement("div");
@@ -1565,13 +1567,13 @@ function renderCurveTop(top) {
     });
     const meta = document.createElement("span");
     meta.className = "race-meta num";
-    meta.textContent = `ошибка ${fmtPercent(item.error)} · разм ${item.size}`;
+    meta.textContent = i18n.t("error {0} · size {1}", fmtPercent(item.error), item.size);
     li.appendChild(meta);
     list.appendChild(li);
   });
 }
 
-/* Curve race log: same feed style as Поиск, curve-specific events. */
+/* Curve race log: same feed style as Search, curve-specific events. */
 function pushCurveLogEntry(parts) {
   parts.gen = state.lastGenNum;
   state.curveLog.unshift(parts);
@@ -1629,21 +1631,21 @@ function updateCurveRaceLog(msg) {
   if (msg.solved_now) {
     pushCurveLogEntry({ pre: "threshold met (error < 2%)", cls: "log-solved" });
   } else if (msg.new_best) {
-    // throttle like Поиск: a 100 gen/s run must not blur the feed
+    // throttle like Search: a 100 gen/s run must not blur the feed
     if (!state.lastCurveLogGen || msg.gen - state.lastCurveLogGen >= 10) {
       const multi = msg.best.x_text.length > 1;
       pushCurveLogEntry({
         pre: multi ? "new best pairs:" : "new best pair:",
         latex: `x(t)=${astToLatexT(astList(msg.best.x_ast)[0])},\\ y(t)=${astToLatexT(astList(msg.best.y_ast)[0])}`,
-        text: `ошибка ${fmtPercent(msg.best.error)}`
-          + (multi ? ` · штрихов ${msg.best.x_text.length}` : ""),
+        text: i18n.t("error {0}", fmtPercent(msg.best.error))
+          + (multi ? i18n.t(" · {0} strokes", msg.best.x_text.length) : ""),
       });
       state.lastCurveLogGen = msg.gen;
     }
   }
 }
 
-/* Per-t check table, the curve analog of «Проверка формулы по числам».
+/* Per-t check table, the curve analog of the formula check table.
    Single stroke: shows x(t), y(t) and the miss; several strokes: the
    miss averaged over the strokes (the formulas sit in the hero). */
 const CURVE_CHECK_TS = [0, 0.2, 0.4, 0.6, 0.8, 1];
@@ -1739,7 +1741,7 @@ function applyCurveSolved(msg) {
   }
   const note = $("curveNote");
   note.classList.add("show");
-  note.textContent = `Порог взят за ${msg.generations} поколений`
+  note.textContent = i18n.t("Threshold beaten in {0} generations", msg.generations)
     + (msg.time_s !== null && msg.time_s !== undefined
         ? ` · ${fmtTime(msg.time_s)}` : "");
   refreshAll();
@@ -1934,15 +1936,15 @@ async function loadPuzzles() {
     <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Search sequences…">
     <div class="puzzle-filters">
       <select id="filterStatus" class="input puzzle-filter-select">
-        <option value="all">Все</option>
-        <option value="unsolved">Нерешённые</option>
-        <option value="solved">Решённые</option>
+        <option value="all">${i18n.t("All")}</option>
+        <option value="unsolved">${i18n.t("Unsolved")}</option>
+        <option value="solved">${i18n.t("Solved")}</option>
       </select>
       <select id="filterDiff" class="input puzzle-filter-select">
-        <option value="all" style="color: var(--text)">Любая</option>
-        <option value="easy" style="color: var(--positive)">Легко</option>
-        <option value="medium" style="color: var(--amber)">Средне</option>
-        <option value="hard" style="color: var(--negative)">Сложно</option>
+        <option value="all" style="color: var(--text)">${i18n.t("Any")}</option>
+        <option value="easy" style="color: var(--positive)">${i18n.t("Easy")}</option>
+        <option value="medium" style="color: var(--amber)">${i18n.t("Medium")}</option>
+        <option value="hard" style="color: var(--negative)">${i18n.t("Hard")}</option>
       </select>
     </div>
   `;
@@ -2118,9 +2120,9 @@ function updateOpsHint() {
     el.hidden = true;
     return;
   }
-  el.textContent = `для «${p.name}» требуются: ` +
+  el.textContent = i18n.t("\"{0}\" requires: ", p.name) +
     missing.map((t) => TOKEN_LABELS[t] || t).join(", ") +
-    " (currently disabled)";
+    i18n.t(" (currently disabled)");
   el.hidden = false;
 }
 
@@ -2141,7 +2143,7 @@ function renderReferenceNote(text, size) {
     meta.style.color = "var(--muted)";
     meta.style.fontSize = "12px";
     meta.title = "The exact formula size (counting sign complexity and number digits).";
-    meta.textContent = `(размер ${size})`;
+    meta.textContent = i18n.t("(size {0})", size);
     note.appendChild(meta);
   }
 }
@@ -2239,12 +2241,12 @@ async function loadLibrary() {
       const refSize = p.ref_size || 0;
       if (h.solved && h.size < refSize) {
         tr.classList.add("better-than-ref");
-        result.title = `Найдена формула короче эталона! (Размер ${h.size} против ${refSize})`;
+        result.title = i18n.t("A shorter formula than the reference was found! (Size {0} vs {1})", h.size, refSize);
         
         const badge = document.createElement("span");
         badge.className = "ref-badge";
         badge.textContent = i18n.t("shorter");
-        badge.title = `Короче эталона (${h.size} против ${refSize})`;
+        badge.title = i18n.t("Shorter than the reference ({0} vs {1})", h.size, refSize);
         result.appendChild(badge);
       }
       
@@ -2435,8 +2437,8 @@ async function loadCuriosities() {
   }
 }
 
-/* Shape presets table: best curve run per preset (like «Библиотека»,
-   but for the Кривые tab). Click = load the drawing onto the canvas. */
+/* Shape presets table: best curve run per preset (like the library,
+   but for the curve tab). Click = load the drawing onto the canvas. */
 async function loadShapes() {
   // the async body fills the DOM after awaits — translate after it settles
   setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
@@ -2627,14 +2629,14 @@ async function loadStats() {
   const data = await api("/api/stats");
   const headline = $("statsHeadline");
   const tiers = $("statsTiers");
-  headline.textContent = `Решено ${data.solved} из ${data.total} последовательностей`;
+  headline.textContent = i18n.t("Solved {0} of {1} sequences", data.solved, data.total);
   tiers.innerHTML = "";
   for (const t of data.by_tier) {
     const cell = document.createElement("div");
     cell.className = "stats-tier" + (t.solved === t.total ? " done" : "");
     cell.dataset.tip = t.solved === t.total
       ? "Every sequence of this tier is solved"
-      : `Решено ${t.solved} из ${t.total} последовательностей этого уровня`;
+      : i18n.t("Solved {0} of {1} sequences at this level", t.solved, t.total);
     const name = document.createElement("span");
     name.className = "stats-tier-name";
     name.textContent = TIER_LABELS[t.tier] || `T${t.tier}`;
@@ -2643,7 +2645,7 @@ async function loadStats() {
     frac.textContent = `${t.solved}/${t.total}`;
     const gens = document.createElement("span");
     gens.className = "stats-tier-gens";
-    gens.textContent = t.avg_gens !== null ? `⌀ ${t.avg_gens} пок.` : "—";
+    gens.textContent = t.avg_gens !== null ? i18n.t("⌀ {0} gens", t.avg_gens) : "—";
     cell.append(name, frac, gens);
     tiers.appendChild(cell);
   }
@@ -2796,7 +2798,7 @@ const RESULT_META = {
   curio: "Almost-correct but bulky monsters — traces of evolution's wandering",
 };
 
-/* ---------- settings (Настройки tab) ---------- */
+/* ---------- settings (Settings tab) ---------- */
 
 const SETTING_FIELDS = [
   ["setPopulation", "population", "number"],
@@ -2845,7 +2847,7 @@ function applySpeedMax() {
   slider.max = String(max);
   if (Number(slider.value) > max) {
     slider.value = String(max);
-    $("speedValue").textContent = `${max} поколений/с`;
+    $("speedValue").textContent = i18n.t("{0} generations/s", max);
     setSpeed(max);
   }
 }
@@ -3179,7 +3181,7 @@ function bindControls() {
         $(t).setAttribute("aria-selected", String(t === tabId));
         $(b).hidden = t !== tabId;
       }
-      // the Курьёзы tab hosts two tables: sequence + curve curiosities
+      // the curiosities tab hosts two tables: sequence + curve curiosities
       $("curveCurioTable").hidden = tabId !== "tabCurio";
       $("resultsMeta").textContent = RESULT_META[metaKey];
       // reset the text search, but keep the dropdown filter
@@ -3195,7 +3197,7 @@ function bindControls() {
   }
   $("resultsMeta").textContent = RESULT_META.library;
 
-  // top-level page tabs: Поиск / Кривые / Результаты / Настройки
+  // top-level page tabs: Search / Curves / Results / Settings
   const panes = [["ptabSearch", "paneSearch"], ["ptabCurves", "paneCurves"],
                  ["ptabResults", "paneResults"],
                  ["ptabSettings", "paneSettings"]];
