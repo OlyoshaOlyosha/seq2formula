@@ -4,9 +4,6 @@
 
 [![Release](https://img.shields.io/github/v/release/OlyoshaOlyosha/seq2formula?logo=github&logoColor=white&color=009688)](https://github.com/OlyoshaOlyosha/seq2formula/releases)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.110-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-148%20passed-3FC07A)
-![Local](https://img.shields.io/badge/network-none-8B93F8)
 
 ![seq2formula — генетический алгоритм находит формулы](docs/img/hero-ru.png)
 
