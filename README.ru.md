@@ -8,7 +8,7 @@
 ![Tests](https://img.shields.io/badge/tests-148%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
-![seq2formula — генетический алгоритм находит формулы](docs/img/social-preview.png)
+![seq2formula — генетический алгоритм находит формулы](docs/img/hero-ru.png)
 
 **Наблюдайте за эволюцией, которая ищет математические формулы для числовых последовательностей.**
 

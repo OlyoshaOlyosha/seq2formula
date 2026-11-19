@@ -8,7 +8,7 @@
 ![Tests](https://img.shields.io/badge/tests-148%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
-![seq2formula — a genetic algorithm discovering formulas](docs/img/social-preview.png)
+![seq2formula — a genetic algorithm discovering formulas](docs/img/hero.png)
 
 **Watch evolution discover the mathematical formulas behind number sequences.**
 
