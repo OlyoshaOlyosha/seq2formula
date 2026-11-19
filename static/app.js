@@ -3084,6 +3084,13 @@ function bindControls() {
   });
   $("puzzleSelect").addEventListener("change", (e) => {
     const p = PUZZLE_CACHE.find((x) => x.id === e.target.value);
+    // Switching tasks discards the current run: a finished run resets
+    // to a fresh view immediately (the server's stop is a no-op there),
+    // a running/paused one is stopped as if the user pressed Stop.
+    if (state.status !== "idle") {
+      control("stop");
+      if (state.status === "finished") setStatus("idle");
+    }
     if (p) {
       $("seqInput").value = p.terms.join(" ");
       $("refInput").value = p.reference || "";

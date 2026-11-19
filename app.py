@@ -598,6 +598,13 @@ class RunManager:
             self.finish_reason = reason
             if notify:
                 asyncio.get_running_loop().create_task(self._finalize())
+        elif self.status == "finished":
+            # Stopping a finished run discards it: the UI gets a fresh
+            # state for the next task (previously this was a no-op and
+            # the solved view hung around until a new run started).
+            self.status = "idle"
+            self.engine = None
+            self.finish_reason = None
         elif self.engine is None:
             self.status = "idle"
 
