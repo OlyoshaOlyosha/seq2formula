@@ -8,13 +8,13 @@
 ![Tests](https://img.shields.io/badge/tests-148%20passed-3FC07A)
 ![Local](https://img.shields.io/badge/network-none-8B93F8)
 
+![seq2formula — a genetic algorithm discovering formulas](docs/img/hero.png)
+
 **Watch evolution discover the mathematical formulas behind number sequences.**
 
 Have you ever looked at a sequence like `1 2 4 8 16` and wondered, *"What is the formula behind these numbers?"* 
 
 seq2formula answers this by running a genetic algorithm in your browser. It breeds, mutates, and crosses mathematical expressions, showing you the live search process. It feels less like a black-box calculator and more like watching a digital gardener grow an answer.
-
-![seq2formula dashboard](docs/img/dashboard-search.png)
 
 Everything runs locally on your machine. No internet access, no telemetry, and no external APIs. Just a Python engine doing the math and a sleek dashboard showing the show.
 
@@ -37,6 +37,8 @@ Everything runs locally on your machine. No internet access, no telemetry, and n
 - **Accuracy**: A formula is scored by testing it against your sequence (e.g., for `n = 1, 2, 3...`). The closer the output values are to your target, the higher the score.
 
 ## Dashboard
+
+![The search in action: population, charts, top formulas](docs/img/dashboard-search.png)
 
 The dashboard is built to be watched. The live view shows the best current formula rendered in beautiful typography, a top-5 leaderboard, and a live event feed. A mini-chart plots the found formula directly against your target sequence. 
 The Results tab tracks your history, maintains a "Hall of Fame" of the shortest formulas ever found, and collects "Curiosities" (absurd, near-miss formulas). You can pause, step through generation-by-generation, or accelerate the search at any time.
