@@ -42,7 +42,7 @@ DEFAULTS = {
 
 
 def load_puzzles() -> list[dict]:
-    with open(ROOT / "sequences.json", encoding="utf-8") as fh:
+    with open(ROOT / "engine" / "sequences.json", encoding="utf-8") as fh:
         return json.load(fh)["puzzles"]
 
 

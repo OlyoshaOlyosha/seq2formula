@@ -1,11 +1,11 @@
-"""Verify and expand sequences.json using explicit mathematical formulas."""
+"""Verify and expand engine/sequences.json using explicit mathematical formulas."""
 
 import json
 import math
 import re
 from pathlib import Path
 
-# Add the project root to sys.path so we can find `sequences.json`
+# Add the project root to sys.path so we can find `engine/sequences.json`
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -170,8 +170,8 @@ def evaluate_ast(node: tuple, n: float) -> float:
 
 
 def verify_and_expand():
-    print("Loading sequences.json...")
-    with open(ROOT / "sequences.json", encoding="utf-8") as f:
+    print("Loading engine/sequences.json...")
+    with open(ROOT / "engine" / "sequences.json", encoding="utf-8") as f:
         data = json.load(f)
 
     errors = 0
@@ -226,9 +226,9 @@ def verify_and_expand():
             print(f"⏭️  {pid} unchanged ({len(new_terms)} terms)")
 
     if modified:
-        with open(ROOT / "sequences.json", "w", encoding="utf-8") as f:
+        with open(ROOT / "engine" / "sequences.json", "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        print("\nDone! sequences.json updated.")
+        print("\nDone! engine/sequences.json updated.")
     else:
         print("\nDone! All sequences are already up to date (file untouched).")
         

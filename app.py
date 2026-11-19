@@ -145,7 +145,7 @@ def _seq_key(terms: list[float]) -> str:
 
 
 def load_puzzles() -> list[dict]:
-    data = _load_json(ROOT / "sequences.json", {"puzzles": []})
+    data = _load_json(ROOT / "engine" / "sequences.json", {"puzzles": []})
     return data.get("puzzles", [])
 
 

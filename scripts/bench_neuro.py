@@ -12,12 +12,14 @@ import argparse
 import concurrent.futures
 import json
 import time
+from pathlib import Path
 
 from engine.neuro import NeuroConfig, NeuroEngine
 
 
 def load_puzzles(tier: int | None) -> list[dict]:
-    with open("sequences.json", encoding="utf-8") as f:
+    root = Path(__file__).resolve().parent.parent
+    with open(root / "engine" / "sequences.json", encoding="utf-8") as f:
         data = json.load(f)
     puzzles = data["puzzles"] if isinstance(data, dict) else data
     return [p for p in puzzles if tier is None or p.get("tier") == tier]

@@ -3,7 +3,7 @@
     {
       "id": "t1-counting",
       "tier": 1,
-      "name": "Счёт",
+      "name": "Counting",
       "terms": [
         1,
         2,
@@ -16,12 +16,13 @@
         9,
         10
       ],
-      "reference": "n"
+      "reference": "n",
+      "name_ru": "Счёт"
     },
     {
       "id": "t1-odd",
       "tier": 1,
-      "name": "Нечётные",
+      "name": "Odd numbers",
       "terms": [
         1,
         3,
@@ -34,12 +35,13 @@
         17,
         19
       ],
-      "reference": "2n - 1"
+      "reference": "2n - 1",
+      "name_ru": "Нечётные"
     },
     {
       "id": "t1-shift-up",
       "tier": 1,
-      "name": "Сдвиг вверх",
+      "name": "Shifted up",
       "terms": [
         4,
         5,
@@ -52,12 +54,13 @@
         12,
         13
       ],
-      "reference": "n + 3"
+      "reference": "n + 3",
+      "name_ru": "Сдвиг вверх"
     },
     {
       "id": "t1-triple-step",
       "tier": 1,
-      "name": "Тройной шаг",
+      "name": "Steps of three",
       "terms": [
         3,
         6,
@@ -70,12 +73,13 @@
         27,
         30
       ],
-      "reference": "3n"
+      "reference": "3n",
+      "name_ru": "Тройной шаг"
     },
     {
       "id": "t1-decay",
       "tier": 1,
-      "name": "Затухание",
+      "name": "Decay",
       "terms": [
         8,
         6,
@@ -88,12 +92,13 @@
         -8,
         -10
       ],
-      "reference": "10 - 2n"
+      "reference": "10 - 2n",
+      "name_ru": "Затухание"
     },
     {
       "id": "t1-shifted-odd",
       "tier": 1,
-      "name": "Нечётные с довеском",
+      "name": "Odd numbers, shifted",
       "terms": [
         3,
         5,
@@ -106,12 +111,13 @@
         19,
         21
       ],
-      "reference": "2n + 1"
+      "reference": "2n + 1",
+      "name_ru": "Нечётные с довеском"
     },
     {
       "id": "t1-backwards",
       "tier": 1,
-      "name": "Обратный счёт",
+      "name": "Backwards counting",
       "terms": [
         6,
         5,
@@ -124,12 +130,13 @@
         -2,
         -3
       ],
-      "reference": "7 - n"
+      "reference": "7 - n",
+      "name_ru": "Обратный счёт"
     },
     {
       "id": "t2-powers-of-two",
       "tier": 2,
-      "name": "Степень двойки",
+      "name": "Powers of two",
       "terms": [
         2,
         4,
@@ -142,12 +149,13 @@
         512,
         1024
       ],
-      "reference": "2^n"
+      "reference": "2^n",
+      "name_ru": "Степень двойки"
     },
     {
       "id": "t2-squares",
       "tier": 2,
-      "name": "Квадраты",
+      "name": "Squares",
       "terms": [
         1,
         4,
@@ -160,12 +168,13 @@
         81,
         100
       ],
-      "reference": "n^2"
+      "reference": "n^2",
+      "name_ru": "Квадраты"
     },
     {
       "id": "t2-squares-plus-one",
       "tier": 2,
-      "name": "Квадраты плюс один",
+      "name": "Squares plus one",
       "terms": [
         2,
         5,
@@ -178,12 +187,13 @@
         82,
         101
       ],
-      "reference": "n^2 + 1"
+      "reference": "n^2 + 1",
+      "name_ru": "Квадраты плюс один"
     },
     {
       "id": "t2-cubes",
       "tier": 2,
-      "name": "Кубы",
+      "name": "Cubes",
       "terms": [
         1,
         8,
@@ -196,12 +206,13 @@
         729,
         1000
       ],
-      "reference": "n^3"
+      "reference": "n^3",
+      "name_ru": "Кубы"
     },
     {
       "id": "t2-powers-of-three",
       "tier": 2,
-      "name": "Тройки в степени",
+      "name": "Powers of three",
       "terms": [
         3,
         9,
@@ -214,12 +225,13 @@
         19683,
         59049
       ],
-      "reference": "3^n"
+      "reference": "3^n",
+      "name_ru": "Тройки в степени"
     },
     {
       "id": "t2-odd-squares",
       "tier": 2,
-      "name": "Квадраты нечётных",
+      "name": "Squares of odd numbers",
       "terms": [
         1,
         9,
@@ -232,12 +244,13 @@
         289,
         361
       ],
-      "reference": "(2n - 1)^2"
+      "reference": "(2n - 1)^2",
+      "name_ru": "Квадраты нечётных"
     },
     {
-      "id": "t2-fourths",
+      "id": "t2-powers-of-four",
       "tier": 2,
-      "name": "Четвёртые степени двойки",
+      "name": "Powers of four",
       "terms": [
         4,
         16,
@@ -250,12 +263,13 @@
         262144,
         1048576
       ],
-      "reference": "4^n"
+      "reference": "4^n",
+      "name_ru": "Четвёртые степени двойки"
     },
     {
       "id": "t2-squares-minus-one",
       "tier": 2,
-      "name": "Квадраты без единицы",
+      "name": "Squares minus one",
       "terms": [
         0,
         3,
@@ -268,12 +282,13 @@
         80,
         99
       ],
-      "reference": "n^2 - 1"
+      "reference": "n^2 - 1",
+      "name_ru": "Квадраты без единицы"
     },
     {
       "id": "t2-mersenne",
       "tier": 2,
-      "name": "Мерсенн",
+      "name": "Mersenne numbers",
       "terms": [
         1,
         3,
@@ -286,12 +301,13 @@
         511,
         1023
       ],
-      "reference": "2^n - 1"
+      "reference": "2^n - 1",
+      "name_ru": "Мерсенн"
     },
     {
       "id": "t2-halving",
       "tier": 2,
-      "name": "Половинки",
+      "name": "Halving",
       "terms": [
         0.5,
         0.25,
@@ -304,12 +320,13 @@
         0.001953125,
         0.0009765625
       ],
-      "reference": "2^(-n)"
+      "reference": "2^(-n)",
+      "name_ru": "Половинки"
     },
     {
       "id": "t3-half-shift",
       "tier": 3,
-      "name": "Полшага со сдвигом",
+      "name": "Halves, shifted",
       "terms": [
         2,
         2.5,
@@ -322,12 +339,13 @@
         6,
         6.5
       ],
-      "reference": "(n + 3) / 2"
+      "reference": "(n + 3) / 2",
+      "name_ru": "Полшага со сдвигом"
     },
     {
-      "id": "t3-pronic",
+      "id": "t3-twice-triangular",
       "tier": 3,
-      "name": "Треугольные удвоенные",
+      "name": "Twice triangular numbers",
       "terms": [
         0,
         2,
@@ -340,12 +358,13 @@
         72,
         90
       ],
-      "reference": "n^2 - n"
+      "reference": "n^2 - n",
+      "name_ru": "Треугольные удвоенные"
     },
     {
       "id": "t3-triangular",
       "tier": 3,
-      "name": "Треугольные числа",
+      "name": "Triangular numbers",
       "terms": [
         1,
         3,
@@ -358,12 +377,13 @@
         45,
         55
       ],
-      "reference": "n(n + 1) / 2"
+      "reference": "n(n + 1) / 2",
+      "name_ru": "Треугольные числа"
     },
     {
       "id": "t3-half-square",
       "tier": 3,
-      "name": "Половина квадрата",
+      "name": "Halved squares",
       "terms": [
         0.5,
         2,
@@ -376,12 +396,13 @@
         40.5,
         50
       ],
-      "reference": "n^2 / 2"
+      "reference": "n^2 / 2",
+      "name_ru": "Половина квадрата"
     },
     {
       "id": "t3-cubes-plus-n",
       "tier": 3,
-      "name": "Кубы и добавка",
+      "name": "Cubes plus n",
       "terms": [
         2,
         10,
@@ -394,12 +415,13 @@
         738,
         1010
       ],
-      "reference": "n^3 + n"
+      "reference": "n^3 + n",
+      "name_ru": "Кубы и добавка"
     },
     {
       "id": "t3-square-over-two",
       "tier": 3,
-      "name": "Квадрат пополам с довеском",
+      "name": "Squares plus one, halved",
       "terms": [
         1,
         2.5,
@@ -412,12 +434,13 @@
         41,
         50.5
       ],
-      "reference": "(n^2 + 1) / 2"
+      "reference": "(n^2 + 1) / 2",
+      "name_ru": "Квадрат пополам с довеском"
     },
     {
       "id": "t3-tetrahedral",
       "tier": 3,
-      "name": "Тетраэдральные",
+      "name": "Tetrahedral numbers",
       "terms": [
         1,
         4,
@@ -430,12 +453,13 @@
         165,
         220
       ],
-      "reference": "n(n+1)(n+2)/6"
+      "reference": "n(n+1)(n+2)/6",
+      "name_ru": "Тетраэдральные"
     },
     {
       "id": "t3-cubes-minus-one",
       "tier": 3,
-      "name": "Кубы без единицы",
+      "name": "Cubes minus one",
       "terms": [
         0,
         7,
@@ -448,12 +472,13 @@
         728,
         999
       ],
-      "reference": "n^3 - 1"
+      "reference": "n^3 - 1",
+      "name_ru": "Кубы без единицы"
     },
     {
       "id": "t3-plus-reciprocal",
       "tier": 3,
-      "name": "Единица плюс доля",
+      "name": "One plus reciprocal",
       "terms": [
         2,
         1.5,
@@ -466,12 +491,13 @@
         1.11111111111,
         1.1
       ],
-      "reference": "(n + 1) / n"
+      "reference": "(n + 1) / n",
+      "name_ru": "Единица плюс доля"
     },
     {
       "id": "t4-factorials",
       "tier": 4,
-      "name": "Факториалы",
+      "name": "Factorials",
       "terms": [
         1,
         2,
@@ -487,12 +513,13 @@
       "reference": "n!",
       "requires": [
         "fact"
-      ]
+      ],
+      "name_ru": "Факториалы"
     },
     {
       "id": "t4-wave",
       "tier": 4,
-      "name": "Волна",
+      "name": "Sine wave",
       "terms": [
         1,
         1.22464679915e-16,
@@ -509,12 +536,13 @@
       "requires": [
         "sin",
         "pi"
-      ]
+      ],
+      "name_ru": "Волна"
     },
     {
       "id": "t4-cos-wave",
       "tier": 4,
-      "name": "Мягкая волна",
+      "name": "Cosine wave",
       "terms": [
         6.12323399574e-17,
         -1,
@@ -531,12 +559,13 @@
       "requires": [
         "cos",
         "pi"
-      ]
+      ],
+      "name_ru": "Мягкая волна"
     },
     {
       "id": "t4-mod-cycle",
       "tier": 4,
-      "name": "Цикл по тройке",
+      "name": "Modulo cycle",
       "terms": [
         2,
         5,
@@ -552,12 +581,13 @@
       "reference": "((n + 2) mod 3)·3 + 2",
       "requires": [
         "mod"
-      ]
+      ],
+      "name_ru": "Цикл по тройке"
     },
     {
       "id": "t4-sqrt-n",
       "tier": 4,
-      "name": "Корни",
+      "name": "Square roots",
       "terms": [
         1,
         1.41421356237,
@@ -573,12 +603,13 @@
       "reference": "sqrt(n)",
       "requires": [
         "sqrt"
-      ]
+      ],
+      "name_ru": "Корни"
     },
     {
       "id": "t4-cbrt-n",
       "tier": 4,
-      "name": "Кубические корни",
+      "name": "Cube roots",
       "terms": [
         1,
         1.25992104989,
@@ -594,12 +625,13 @@
       "reference": "cbrt(n)",
       "requires": [
         "cbrt"
-      ]
+      ],
+      "name_ru": "Кубические корни"
     },
     {
       "id": "t4-ln-n",
       "tier": 4,
-      "name": "Натуральный логарифм",
+      "name": "Natural logarithm",
       "terms": [
         0,
         0.69314718056,
@@ -615,12 +647,13 @@
       "reference": "ln(n)",
       "requires": [
         "ln"
-      ]
+      ],
+      "name_ru": "Натуральный логарифм"
     },
     {
       "id": "t4-abs-dip",
       "tier": 4,
-      "name": "Долина",
+      "name": "Valley",
       "terms": [
         3,
         2,
@@ -636,12 +669,13 @@
       "reference": "abs(n - 4)",
       "requires": [
         "abs"
-      ]
+      ],
+      "name_ru": "Долина"
     },
     {
       "id": "t4-fact-plus-n",
       "tier": 4,
-      "name": "Факториалы с приправой",
+      "name": "Factorials plus n",
       "terms": [
         2,
         4,
@@ -657,12 +691,13 @@
       "reference": "n! + n",
       "requires": [
         "fact"
-      ]
+      ],
+      "name_ru": "Факториалы с приправой"
     },
     {
       "id": "t4-e-powers",
       "tier": 4,
-      "name": "Степени e",
+      "name": "Powers of e",
       "terms": [
         1,
         2.71828182846,
@@ -678,12 +713,13 @@
       "reference": "e^(n - 1)",
       "requires": [
         "e"
-      ]
+      ],
+      "name_ru": "Степени e"
     },
     {
       "id": "t5-fifth-powers",
       "tier": 5,
-      "name": "Пятые степени",
+      "name": "Fifth powers",
       "terms": [
         1,
         32,
@@ -696,12 +732,13 @@
         59049,
         100000
       ],
-      "reference": "n^5"
+      "reference": "n^5",
+      "name_ru": "Пятые степени"
     },
     {
       "id": "t5-pyramidal",
       "tier": 5,
-      "name": "Квадратные пирамидальные",
+      "name": "Square pyramidal numbers",
       "terms": [
         1,
         5,
@@ -714,12 +751,13 @@
         285,
         385
       ],
-      "reference": "n(n+1)(2n+1)/6"
+      "reference": "n(n+1)(2n+1)/6",
+      "name_ru": "Квадратные пирамидальные"
     },
     {
       "id": "t5-power-plus-n",
       "tier": 5,
-      "name": "Степень и добавка",
+      "name": "Powers of two plus n",
       "terms": [
         3,
         6,
@@ -732,12 +770,13 @@
         521,
         1034
       ],
-      "reference": "2^n + n"
+      "reference": "2^n + n",
+      "name_ru": "Степень и добавка"
     },
     {
       "id": "t5-pendulum",
       "tier": 5,
-      "name": "Маятник",
+      "name": "Alternating ±1",
       "terms": [
         -1,
         1,
@@ -753,12 +792,13 @@
       "reference": "1 - 2(n mod 2)",
       "requires": [
         "mod"
-      ]
+      ],
+      "name_ru": "Маятник"
     },
     {
       "id": "t5-wave-squared",
       "tier": 5,
-      "name": "Волна в квадрате",
+      "name": "Squared sine wave",
       "terms": [
         1,
         1.49975978266e-32,
@@ -776,12 +816,13 @@
         "sin",
         "pi",
         "^"
-      ]
+      ],
+      "name_ru": "Волна в квадрате"
     },
     {
       "id": "t1-linear-neg",
       "tier": 1,
-      "name": "Отрицательный старт",
+      "name": "Negative start",
       "terms": [
         -3,
         -1,
@@ -794,12 +835,13 @@
         13,
         15
       ],
-      "reference": "2n - 5"
+      "reference": "2n - 5",
+      "name_ru": "Отрицательный старт"
     },
     {
       "id": "t2-eighth-powers",
       "tier": 2,
-      "name": "Восьмые степени",
+      "name": "Eighth powers",
       "terms": [
         1,
         256,
@@ -812,12 +854,13 @@
         43046721,
         100000000
       ],
-      "reference": "n^8"
+      "reference": "n^8",
+      "name_ru": "Восьмые степени"
     },
     {
       "id": "t3-cube-minus-n",
       "tier": 3,
-      "name": "Куб без приправы",
+      "name": "Cubes minus n",
       "terms": [
         0,
         6,
@@ -830,12 +873,13 @@
         720,
         990
       ],
-      "reference": "n^3 - n"
+      "reference": "n^3 - n",
+      "name_ru": "Куб без приправы"
     },
     {
       "id": "t3-sum-of-cubes",
       "tier": 3,
-      "name": "Кубы в квадрате",
+      "name": "Sum of cubes",
       "terms": [
         1,
         9,
@@ -848,12 +892,13 @@
         2025,
         3025
       ],
-      "reference": "(n(n+1)/2)^2"
+      "reference": "(n(n+1)/2)^2",
+      "name_ru": "Кубы в квадрате"
     },
     {
       "id": "t4-abs-sin",
       "tier": 4,
-      "name": "Модуль синуса",
+      "name": "Absolute sine",
       "terms": [
         1,
         1.22464679915e-16,
@@ -871,12 +916,13 @@
         "abs",
         "sin",
         "pi"
-      ]
+      ],
+      "name_ru": "Модуль синуса"
     },
     {
       "id": "t4-cos-wave-neg",
       "tier": 4,
-      "name": "Инвертированная волна",
+      "name": "Alternating cosine",
       "terms": [
         -1,
         1,
@@ -893,12 +939,13 @@
       "requires": [
         "cos",
         "pi"
-      ]
+      ],
+      "name_ru": "Инвертированная волна"
     },
     {
       "id": "t5-fibonacci",
       "tier": 5,
-      "name": "Фибоначчи",
+      "name": "Fibonacci numbers",
       "terms": [
         1,
         1,
@@ -916,12 +963,13 @@
         "sqrt",
         "^",
         "/"
-      ]
+      ],
+      "name_ru": "Фибоначчи"
     },
     {
       "id": "t5-catalan",
       "tier": 5,
-      "name": "Каталана",
+      "name": "Catalan numbers",
       "terms": [
         1,
         1,
@@ -937,12 +985,13 @@
       "reference": "(2(n-1))! / (n!(n-1)!)",
       "requires": [
         "fact"
-      ]
+      ],
+      "name_ru": "Каталана"
     },
     {
-      "id": "t5-n-power-n",
+      "id": "t5-self-powers",
       "tier": 5,
-      "name": "n в степени n",
+      "name": "Self powers",
       "terms": [
         1,
         4,
@@ -954,12 +1003,13 @@
         16777216,
         387420489
       ],
-      "reference": "n^n"
+      "reference": "n^n",
+      "name_ru": "n в степени n"
     },
     {
       "id": "t5-pell",
       "tier": 5,
-      "name": "Числа Пелля",
+      "name": "Pell numbers",
       "terms": [
         1.0,
         2.0,
@@ -978,12 +1028,13 @@
         "^",
         "/",
         "*"
-      ]
+      ],
+      "name_ru": "Числа Пелля"
     },
     {
       "id": "t1-four-step",
       "tier": 1,
-      "name": "Четыре шага",
+      "name": "Steps of four",
       "terms": [
         5,
         9,
@@ -996,12 +1047,13 @@
         37,
         41
       ],
-      "reference": "4n + 1"
+      "reference": "4n + 1",
+      "name_ru": "Четыре шага"
     },
     {
       "id": "t2-fourth-powers",
       "tier": 2,
-      "name": "Четвёртые степени",
+      "name": "Fourth powers",
       "terms": [
         1,
         16,
@@ -1014,12 +1066,13 @@
         6561,
         10000
       ],
-      "reference": "n^4"
+      "reference": "n^4",
+      "name_ru": "Четвёртые степени"
     },
     {
       "id": "t2-powers-of-five",
       "tier": 2,
-      "name": "Степени пятёрки",
+      "name": "Powers of five",
       "terms": [
         5,
         25,
@@ -1032,12 +1085,13 @@
         1953125,
         9765625
       ],
-      "reference": "5^n"
+      "reference": "5^n",
+      "name_ru": "Степени пятёрки"
     },
     {
       "id": "t3-square-plus-linear",
       "tier": 3,
-      "name": "Квадрат с линейкой",
+      "name": "Squares plus linear",
       "terms": [
         3,
         7,
@@ -1050,12 +1104,13 @@
         91,
         111
       ],
-      "reference": "n^2 + n + 1"
+      "reference": "n^2 + n + 1",
+      "name_ru": "Квадрат с линейкой"
     },
     {
       "id": "t3-cubic-sum",
       "tier": 3,
-      "name": "Сумма степеней",
+      "name": "Cubic sum",
       "terms": [
         4,
         15,
@@ -1068,12 +1123,13 @@
         820,
         1111
       ],
-      "reference": "n^3 + n^2 + n + 1"
+      "reference": "n^3 + n^2 + n + 1",
+      "name_ru": "Сумма степеней"
     },
     {
       "id": "t3-parity",
       "tier": 3,
-      "name": "Чёт-нечет",
+      "name": "Even-odd alternation",
       "terms": [
         7,
         3,
@@ -1090,12 +1146,13 @@
       "requires": [
         "if",
         "mod"
-      ]
+      ],
+      "name_ru": "Чёт-нечет"
     },
     {
       "id": "t4-factorial-minus-one",
       "tier": 4,
-      "name": "Факториал без единицы",
+      "name": "Factorials minus one",
       "terms": [
         0,
         1,
@@ -1111,12 +1168,13 @@
       "reference": "n! - 1",
       "requires": [
         "fact"
-      ]
+      ],
+      "name_ru": "Факториал без единицы"
     },
     {
       "id": "t4-factorial-plus-one",
       "tier": 4,
-      "name": "Факториал с единицей",
+      "name": "Factorials plus one",
       "terms": [
         2,
         3,
@@ -1132,12 +1190,13 @@
       "reference": "n! + 1",
       "requires": [
         "fact"
-      ]
+      ],
+      "name_ru": "Факториал с единицей"
     },
     {
       "id": "t4-n-factorial",
       "tier": 4,
-      "name": "Умноженный факториал",
+      "name": "Factorials times n",
       "terms": [
         1,
         4,
@@ -1153,12 +1212,13 @@
       "reference": "n * n!",
       "requires": [
         "fact"
-      ]
+      ],
+      "name_ru": "Умноженный факториал"
     },
     {
       "id": "t5-alternating-cubes",
       "tier": 5,
-      "name": "Знакочередующиеся кубы",
+      "name": "Alternating cubes",
       "terms": [
         -1,
         8,
@@ -1171,24 +1231,26 @@
         -729,
         1000
       ],
-      "reference": "(-1)^n * n^3"
+      "reference": "(-1)^n * n^3",
+      "name_ru": "Знакочередующиеся кубы"
     },
     {
       "id": "t5-double-exponential",
       "tier": 5,
-      "name": "Двойная экспонента",
+      "name": "Double exponential",
       "terms": [
         4,
         16,
         256,
         65536
       ],
-      "reference": "2^(2^n)"
+      "reference": "2^(2^n)",
+      "name_ru": "Двойная экспонента"
     },
     {
       "id": "t5-lucas",
       "tier": 5,
-      "name": "Числа Люка",
+      "name": "Lucas numbers",
       "terms": [
         1,
         3,
@@ -1206,12 +1268,13 @@
         "sqrt",
         "^",
         "/"
-      ]
+      ],
+      "name_ru": "Числа Люка"
     },
     {
       "id": "t5-fermat",
       "tier": 5,
-      "name": "Числа Ферма",
+      "name": "Fermat numbers",
       "terms": [
         3,
         5,
@@ -1222,12 +1285,13 @@
       "reference": "2^(2^(n-1)) + 1",
       "requires": [
         "^"
-      ]
+      ],
+      "name_ru": "Числа Ферма"
     },
     {
       "id": "t5-cullen",
       "tier": 5,
-      "name": "Числа Каллена",
+      "name": "Cullen numbers",
       "terms": [
         3,
         9,
@@ -1244,12 +1308,13 @@
       "requires": [
         "^",
         "*"
-      ]
+      ],
+      "name_ru": "Числа Каллена"
     },
     {
       "id": "t5-woodall",
       "tier": 5,
-      "name": "Числа Вудалла",
+      "name": "Woodall numbers",
       "terms": [
         1,
         7,
@@ -1266,7 +1331,8 @@
       "requires": [
         "^",
         "*"
-      ]
+      ],
+      "name_ru": "Числа Вудалла"
     }
   ]
 }

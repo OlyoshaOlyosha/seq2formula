@@ -1917,6 +1917,13 @@ async function api(path, body) {
 
 let PUZZLE_CACHE = [];
 
+/* Localized puzzle name: the library data is English canonical
+   (engine/sequences.json) with an optional name_ru pair. */
+function pzName(p) {
+  if (!p) return "";
+  return (i18n.lang === "ru" && p.name_ru) ? p.name_ru : p.name;
+}
+
 async function loadPuzzles() {
   // the async body fills the DOM after awaits — translate after it settles
   setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
@@ -1972,7 +1979,7 @@ async function loadPuzzles() {
       // 1. Hidden native option
       const opt = document.createElement("option");
       opt.value = p.id;
-      opt.textContent = `${p.name} · ${p.terms.slice(0, 4).join(" ")}…`;
+      opt.textContent = `${pzName(p)} · ${p.terms.slice(0, 4).join(" ")}…`;
       group.appendChild(opt);
       
       // 2. Custom visual item
@@ -1990,7 +1997,7 @@ async function loadPuzzles() {
       const dot = document.createElement("span");
       dot.className = `diff-dot ${p.difficulty || "unseen"}`;
       name.appendChild(dot);
-      name.appendChild(document.createTextNode(p.name));
+      name.appendChild(document.createTextNode(pzName(p)));
       
       const desc = document.createElement("div");
       desc.className = "modern-select-item-desc";
@@ -2095,7 +2102,7 @@ function updatePuzzleLabel() {
     $("puzzleSelectMenu").querySelectorAll(".modern-select-item").forEach(el => el.classList.remove("active"));
   } else {
     const p = PUZZLE_CACHE.find(x => x.id === val);
-    label.textContent = p ? p.name : i18n.t("— custom sequence —");
+    label.textContent = p ? pzName(p) : i18n.t("— custom sequence —");
     $("puzzleSelectMenu").querySelectorAll(".modern-select-item").forEach(el => {
       el.classList.toggle("active", el.dataset.id === val);
     });
@@ -2120,7 +2127,7 @@ function updateOpsHint() {
     el.hidden = true;
     return;
   }
-  el.textContent = i18n.t("\"{0}\" requires: ", p.name) +
+  el.textContent = i18n.t("\"{0}\" requires: ", pzName(p)) +
     missing.map((t) => TOKEN_LABELS[t] || t).join(", ") +
     i18n.t(" (currently disabled)");
   el.hidden = false;
@@ -2218,14 +2225,14 @@ async function loadLibrary() {
 
     // Store plain text for the search filter (KaTeX renders math as spans,
     // making textContent useless for matching "2^n").
-    tr.dataset.search = (p.name + " " + p.terms.join(" ") + " " + (p.reference || "") + " " + (h && h.formula ? h.formula : "")).toLowerCase();
+    tr.dataset.search = ((p.name + " " + (p.name_ru || "") + " " + p.terms.join(" ") + " " + (p.reference || "") + " " + (h && h.formula ? h.formula : "")).toLowerCase());
 
     const title = document.createElement("td");
     const dot = document.createElement("span");
     dot.className = `diff-dot ${p.difficulty || "unseen"}`;
     dot.title = p.difficulty === "easy" ? "Easy" : p.difficulty === "medium" ? "Medium" : p.difficulty === "hard" ? "Hard" : "Not solved yet";
     title.appendChild(dot);
-    title.innerHTML += `<b>${p.name}</b><br><span style="color:var(--faint);font-size:12px; margin-left: 14px;">${p.terms.join(" ")}</span>`;
+    title.innerHTML += `<b>${pzName(p)}</b><br><span style="color:var(--faint);font-size:12px; margin-left: 14px;">${p.terms.join(" ")}</span>`;
     tr.appendChild(title);
 
     const ref = document.createElement("td");
