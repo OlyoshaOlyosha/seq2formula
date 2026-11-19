@@ -7,6 +7,21 @@ KEYS ARE FORBIDDEN here (a reversed entry would act as a rewrite rule
 and flip already-English strings back to Russian).
 """
 MAP = {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     "— из библиотеки —": "— from the library —",
     "например: 1 3 5 7 9": "e.g.: 1 3 5 7 9",
     "Язык интерфейса": "Interface language",
@@ -88,8 +103,6 @@ MAP = {
     "косинус": "cosine",
     "тангенс": "tangent",
     "натуральный логарифм": "natural logarithm",
-    "число π": "pi",
-    "число e": "e",
     "разветвление: если условие, то одно, иначе другое":
         "branch: if the condition holds, one value, otherwise the other",
     "Текущий поиск": "Current search",

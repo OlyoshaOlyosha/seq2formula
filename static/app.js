@@ -438,7 +438,8 @@ function setChip(text, cls) {
 }
 
 function setStatus(status) {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   if (status === "running") stopTitleFlash();
   state.status = status;
   const running = status === "running" || status === "paused" || status === "finished";
@@ -1084,10 +1085,9 @@ function syncCurveUI() {
   $("curveSmoothBtn").disabled = running;
   $("curveCanvas").classList.toggle("locked", running);
   const chip = $("curveChip");
-  if (state.status === "running") chip.textContent = "searching";
-  else if (state.status === "paused") chip.textContent = "paused";
-  else if (state.status === "finished") chip.textContent = "finished";
-  else chip.textContent = "no run";
+  chip.textContent = i18n.t(state.status === "running" ? "searching"
+    : state.status === "paused" ? "paused"
+    : state.status === "finished" ? "finished" : "no run");
   const showLive = state.mode === "curve" && (running || state.status === "finished");
   $("curveEmpty").hidden = showLive;
   $("curveLive").hidden = !showLive;
@@ -1729,7 +1729,7 @@ function cancelCurvePlayback() {
 function applyCurveSolved(msg) {
   state.lastRunSolved = true;
   setStatus("finished");
-  $("curveChip").textContent = "solved";
+  $("curveChip").textContent = i18n.t("solved");
   $("curveChip").className = "chip solved";
   if (state.settings) {
     if (state.settings.notify_sound && state.settings.notify_volume > 0) {
@@ -1801,7 +1801,8 @@ async function startCurveRun(event) {
 }
 
 async function loadCurves() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/curves");
   const rows = $("curveRows");
   rows.innerHTML = "";
@@ -1818,7 +1819,7 @@ async function loadCurves() {
   for (const c of data.curves) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Put this drawing back on the canvas";
+    tr.title = i18n.t("Put this drawing back on the canvas");
     tr.addEventListener("click", () => {
       const strokes = entryStrokes(c);
       if (!strokes.length || !strokes[0].length) return;
@@ -1915,7 +1916,8 @@ async function api(path, body) {
 let PUZZLE_CACHE = [];
 
 async function loadPuzzles() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/puzzles");
   PUZZLE_CACHE = data.puzzles;
   const select = $("puzzleSelect");
@@ -2158,7 +2160,8 @@ function markPuzzle(p) {
 }
 
 async function loadLibrary() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/history");
   const puzzles = await api("/api/puzzles");
   const history = data.history;
@@ -2240,7 +2243,7 @@ async function loadLibrary() {
         
         const badge = document.createElement("span");
         badge.className = "ref-badge";
-        badge.textContent = "shorter";
+        badge.textContent = i18n.t("shorter");
         badge.title = `Короче эталона (${h.size} против ${refSize})`;
         result.appendChild(badge);
       }
@@ -2286,7 +2289,8 @@ async function loadLibrary() {
 }
 
 async function loadMySeqs() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/history");
   const rows = $("mySeqRows");
   rows.innerHTML = "";
@@ -2390,7 +2394,8 @@ async function loadMySeqs() {
 }
 
 async function loadCuriosities() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/curiosities");
   const rows = $("curioRows");
   rows.innerHTML = "";
@@ -2433,7 +2438,8 @@ async function loadCuriosities() {
 /* Shape presets table: best curve run per preset (like «Библиотека»,
    but for the Кривые tab). Click = load the drawing onto the canvas. */
 async function loadShapes() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/curves");
   const rows = $("shapeRows");
   rows.innerHTML = "";
@@ -2463,7 +2469,7 @@ async function loadShapes() {
     });
 
     const name = document.createElement("td");
-    name.textContent = preset.name;
+    name.textContent = i18n.t(preset.name);
     tr.appendChild(name);
 
     const result = document.createElement("td");
@@ -2500,7 +2506,8 @@ async function loadShapes() {
    close ("polygon instead of a circle"). Click = load the drawing onto
    the curve canvas, like the shapes table. */
 async function loadCurveCuriosities() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/curve_curiosities");
   if (data.threshold) {
     $("curveCurioCaption").textContent =
@@ -2615,7 +2622,8 @@ function refreshAll() {
 const TIER_LABELS = { 1: "T1", 2: "T2", 3: "T3", 4: "T4", 5: "T5" };
 
 async function loadStats() {
-  if (window.i18n && i18n.lang !== "en") i18n.apply();
+  // the async body fills the DOM after awaits — translate after it settles
+  setTimeout(() => { if (window.i18n && i18n.lang !== "en") i18n.apply(); }, 500);
   const data = await api("/api/stats");
   const headline = $("statsHeadline");
   const tiers = $("statsTiers");
@@ -3136,7 +3144,7 @@ function bindControls() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn preset-btn";
-    btn.textContent = preset.name;
+    btn.textContent = i18n.t(preset.name);
     btn.addEventListener("click", () => {
       if (state.status === "running" || state.status === "paused") return;
       state.curveStrokes = [preset.pts.map((p) => ({ ...p }))];

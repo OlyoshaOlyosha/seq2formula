@@ -49,7 +49,7 @@ def covered(s: str) -> bool:
 
 missing = sorted(s for s in strings
                  if not covered(s) and not fragment.search(s)
-                 and s not in ("RU", "cos", "ln", "sin", "tan", "if",
+                 and s not in ("RU", "cos", "ln", "sin", "tan", "if", "pi", "e",
                                "seq2formula",
                                "xʸ", "|x|", "⌊x⌋"))
 print(f"UI strings: {len(strings)}, locale: {len(locale)}, missing: {len(missing)}")
