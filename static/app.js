@@ -72,10 +72,10 @@ function fmtPercent(v) {
 
 function fmtTime(sec) {
   if (sec === null || sec === undefined) return "—";
-  if (sec < 60) return fmtNum(sec) + " с";
+  if (sec < 60) return fmtNum(sec) + " s";
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
-  return `${m} м ${String(s).padStart(2, "0")} с`;
+  return `${m} m ${String(s).padStart(2, "0")} s`;
 }
 
 function fmtWhen(iso) {
@@ -139,7 +139,7 @@ function astToLatex(ast) {
   }
   if (ast.t === "if") {
     // piecewise fork: the cases environment draws its own left brace
-    return `\\begin{cases}${astToLatex(ast.a)} & \\text{если } ${astToLatex(ast.c)} \\\\ ${astToLatex(ast.b)} & \\text{иначе}\\end{cases}`;
+    return `\\begin{cases}${astToLatex(ast.a)} & \\text{if } ${astToLatex(ast.c)} \\\\ ${astToLatex(ast.b)} & \\text{otherwise}\\end{cases}`;
   }
   // binary op: fold a negative constant into the sign (n + -3 -> n - 3)
   const neg = ast.t === "+" || ast.t === "-" ? negativeConst(ast.r) : null;
@@ -250,7 +250,7 @@ function lineSeries(label, color, dash) {
   return {
     label,
     stroke: color,
-    width: label === "лучшая" ? 2 : 1.5,
+    width: label === "best" ? 2 : 1.5,
     dash,
     points: { show: false },
   };
@@ -259,11 +259,11 @@ function lineSeries(label, color, dash) {
 function makeCharts() {
   // Axis titles make the charts self-explanatory: without them "1 -> 400"
   // on the size histogram is meaningless to a reader.
-  const axisX = { ...axisOpts(), label: "поколение", values: (u, vals) => vals.map((v) => String(Math.round(v))) };
+  const axisX = { ...axisOpts(), label: "generation", values: (u, vals) => vals.map((v) => String(Math.round(v))) };
   const common = { ...baseOpts(170, [
-      { label: "поколение" },
-      lineSeries("лучшая", CHART_COLORS.accent),
-      lineSeries("средняя", CHART_COLORS.muted, [4, 4]),
+      { label: "generation" },
+      lineSeries("best", CHART_COLORS.accent),
+      lineSeries("mean", CHART_COLORS.muted, [4, 4]),
     ], true), scales: { x: { time: false } }, axes: [axisX, { ...axisOpts(3), label: "fitness" }] };
 
   state.charts.fitness = new uPlot({ ...common }, [[], [], []], $("chartFitness"));
@@ -271,32 +271,32 @@ function makeCharts() {
   state.charts.error = new uPlot(
     { ...common,
       series: [
-        { label: "поколение" },
-        { ...lineSeries("лучшая", CHART_COLORS.amber), width: 2 },
-        lineSeries("средняя", CHART_COLORS.muted, [4, 4]),
+        { label: "generation" },
+        { ...lineSeries("best", CHART_COLORS.amber), width: 2 },
+        lineSeries("mean", CHART_COLORS.muted, [4, 4]),
       ],
-      axes: [axisX, { ...axisOpts(3), label: "ошибка", values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
+      axes: [axisX, { ...axisOpts(3), label: "error", values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
     [[], [], []], $("chartError"));
 
   state.charts.diversity = new uPlot(
     { ...baseOpts(140, [
-        { label: "поколение" },
-        { ...lineSeries("разнообразие", CHART_COLORS.teal), width: 1.5 },
+        { label: "generation" },
+        { ...lineSeries("diversity", CHART_COLORS.teal), width: 1.5 },
       ], false),
       scales: { x: { time: false } },
-      axes: [axisX, { ...axisOpts(2), label: "доля уникальных" }] },
+      axes: [axisX, { ...axisOpts(2), label: "unique share" }] },
     [[], []], $("chartDiversity"));
 
   const barsPath = window.uPlot && uPlot.paths && uPlot.paths.bars
     ? uPlot.paths.bars({ align: 1, size: [1, 100] }) : undefined;
   state.charts.sizes = new uPlot(
     { ...baseOpts(140, [
-        { label: "размер" },
-        { label: "деревьев", stroke: CHART_COLORS.accent, width: 2,
+        { label: "size" },
+        { label: "trees", stroke: CHART_COLORS.accent, width: 2,
           points: { show: false }, paths: barsPath, fill: "rgba(139,147,248,0.18)" },
       ], false),
       scales: { x: { time: false } },
-      axes: [{ ...axisX, label: "размер формулы" }, { ...axisOpts(), label: "кол-во формул" }] },
+      axes: [{ ...axisX, label: "formula size" }, { ...axisOpts(), label: "formula count" }] },
     [[], []], $("chartSizes"));
 
   // hero mini-chart: the formula (line) against the target sequence (dots)
@@ -305,9 +305,9 @@ function makeCharts() {
   state.charts.hero = new uPlot(
     { ...baseOpts(110, [
         { label: "n" },
-        { label: "цель", stroke: CHART_COLORS.faint, width: 0, paths: dots(5),
+        { label: "target", stroke: CHART_COLORS.faint, width: 0, paths: dots(5),
           points: { show: true } },
-        { label: "формула", stroke: CHART_COLORS.accent, width: 2,
+        { label: "formula", stroke: CHART_COLORS.accent, width: 2,
           points: { show: true, size: 3 } },
       ], false),
       scales: { x: { time: false } },
@@ -319,11 +319,11 @@ function makeCharts() {
   state.charts.curveError = new uPlot(
     { ...common,
       series: [
-        { label: "поколение" },
-        { ...lineSeries("лучшая", CHART_COLORS.amber), width: 2 },
-        lineSeries("средняя", CHART_COLORS.muted, [4, 4]),
+        { label: "generation" },
+        { ...lineSeries("best", CHART_COLORS.amber), width: 2 },
+        lineSeries("mean", CHART_COLORS.muted, [4, 4]),
       ],
-      axes: [axisX, { ...axisOpts(3), label: "ошибка",
+      axes: [axisX, { ...axisOpts(3), label: "error",
                       values: (u, vals) => vals.map((v) => fmtNum(v)) }] },
     [[], [], []], $("chartCurveError"));
 
@@ -333,21 +333,21 @@ function makeCharts() {
 
   state.charts.curveDiversity = new uPlot(
     { ...baseOpts(140, [
-        { label: "поколение" },
-        { ...lineSeries("разнообразие", CHART_COLORS.teal), width: 1.5 },
+        { label: "generation" },
+        { ...lineSeries("diversity", CHART_COLORS.teal), width: 1.5 },
       ], false),
       scales: { x: { time: false } },
-      axes: [axisX, { ...axisOpts(2), label: "доля уникальных" }] },
+      axes: [axisX, { ...axisOpts(2), label: "unique share" }] },
     [[], []], $("chartCurveDiversity"));
 
   state.charts.curveSizes = new uPlot(
     { ...baseOpts(140, [
-        { label: "размер" },
-        { label: "пар", stroke: CHART_COLORS.accent, width: 2,
+        { label: "size" },
+        { label: "pairs", stroke: CHART_COLORS.accent, width: 2,
           points: { show: false }, paths: barsPath, fill: "rgba(139,147,248,0.18)" },
       ], false),
       scales: { x: { time: false } },
-      axes: [{ ...axisX, label: "размер пары" }, { ...axisOpts(), label: "кол-во пар" }] },
+      axes: [{ ...axisX, label: "pair size" }, { ...axisOpts(), label: "pair count" }] },
     [[], []], $("chartCurveSizes"));
 
   resizeCharts();
@@ -432,12 +432,13 @@ function scheduleChartUpdate() {
 
 function setChip(text, cls) {
   const chip = $("liveChip");
-  chip.textContent = text;
+  chip.textContent = i18n.t(text);
   chip.className = "chip" + (cls ? " " + cls : "");
   if (cls !== "error") chip.title = "";
 }
 
 function setStatus(status) {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   if (status === "running") stopTitleFlash();
   state.status = status;
   const running = status === "running" || status === "paused" || status === "finished";
@@ -457,11 +458,11 @@ function setStatus(status) {
   document.querySelectorAll(".op-chip").forEach((chip) => {
     chip.disabled = status === "running" || status === "paused";
   });
-  $("pauseLabel").textContent = status === "paused" ? "Продолжить" : "Пауза";
-  if (status === "running") setChip("поиск идёт", "run");
-  else if (status === "paused") setChip("пауза", "paused");
-  else if (status === "finished") setChip("завершено", "finished");
-  else setChip("нет прогона");
+  $("pauseLabel").textContent = status === "paused" ? i18n.t("Resume") : i18n.t("Pause");
+  if (status === "running") setChip("searching", "run");
+  else if (status === "paused") setChip("paused", "paused");
+  else if (status === "finished") setChip("finished", "finished");
+  else setChip("no run");
   syncCurveUI();
 }
 
@@ -498,7 +499,7 @@ function applyGen(msg) {
          now - state.genTimestamps[0] > 2000) state.genTimestamps.shift();
   const span = (now - state.genTimestamps[0]) / 1000;
   const gps = state.genTimestamps.length > 1 && span > 0.3
-    ? fmtNum((state.genTimestamps.length - 1) / span) + " пок/с" : "—";
+    ? fmtNum((state.genTimestamps.length - 1) / span) + " g/s" : "—";
   const elapsed = state.runStartedAt ? fmtTime((now - state.runStartedAt) / 1000) : "—";
   $("kpiSpeedTime").textContent = `${gps} · ${elapsed}`;
 
@@ -515,10 +516,10 @@ function applyGen(msg) {
   }
   const sub = [];
   sub.push(`fitness ${fmtNum(msg.best.fitness)}`);
-  if (msg.best.exact) sub.push('<span class="ok">точное совпадение по значениям</span>');
+  if (msg.best.exact) sub.push(`<span class="ok">${i18n.t("exact match by values")}</span>`);
   $("bestSub").innerHTML = sub.join(" · ");
-  $("heroLabel").textContent = msg.solved && !msg.solved_now
-    ? "Лучшая формула (усадка — ищем короче)" : "Лучшая формула";
+  $("heroLabel").textContent = i18n.t(msg.solved && !msg.solved_now
+    ? "Best formula (shrinking — hunting a shorter one)" : "Best formula");
 
   // top-10 list: at 100 gen/s it flickers unreadably. Throttle to ~3
   // updates/s; force a redraw on the exact-hit event or during shrink.
@@ -566,7 +567,7 @@ function updateHeroChart(values) {
 function updateEvoBtn() {
   const btn = $("evoBtn");
   btn.hidden = state.champions.length < 2;
-  btn.textContent = state.evoPlaying ? "Остановить"
+  btn.textContent = state.evoPlaying ? "Stop"
     : `Эволюция (${state.champions.length})`;
 }
 
@@ -586,7 +587,7 @@ function restoreFinalChampion() {
   if (!last) return;
   renderKatex($("bestFormula"), astToLatex(last.ast), true);
   updateHeroChart(last.values);
-  $("heroLabel").textContent = "Лучшая формула";
+  $("heroLabel").textContent = i18n.t("Best formula");
 }
 
 function playEvolution() {
@@ -624,11 +625,11 @@ function showPlotPopover(evt, sequence, values) {
     state.charts.popover = new uPlot(
       { ...baseOpts(150, [
           { label: "n" },
-          { label: "цель", stroke: CHART_COLORS.faint, width: 0,
+          { label: "target", stroke: CHART_COLORS.faint, width: 0,
             paths: window.uPlot && uPlot.paths && uPlot.paths.points
               ? uPlot.paths.points({ size: 4 }) : undefined,
             points: { show: true } },
-          { label: "формула", stroke: CHART_COLORS.accent, width: 2,
+          { label: "formula", stroke: CHART_COLORS.accent, width: 2,
             points: { show: true, size: 3 } },
         ], false),
         scales: { x: { time: false } },
@@ -691,7 +692,7 @@ function renderTop(top) {
     const meta = document.createElement("span");
     meta.className = "race-meta num";
     meta.textContent = `fit ${fmtNum(item.fitness)} · размер ${item.size}`;
-    meta.title = "Fitness = 1 - ошибка - штраф_за_размер. Ближе к 1.0 — лучше.";
+    meta.title = "Fitness = 1 - error - size_penalty. Closer to 1.0 is better.";
     li.appendChild(meta);
     list.appendChild(li);
   });
@@ -716,7 +717,7 @@ function renderRaceLog() {
     g.className = "race-log-gen num";
     // generations are 1-based everywhere on the dashboard
     g.textContent = e.gen === null || e.gen === undefined
-      ? "—" : "пок. " + (e.gen + 1);
+      ? "—" : "gen. " + (e.gen + 1);
     li.appendChild(g);
     if (e.pre) {
       const pre = document.createElement("span");
@@ -751,17 +752,17 @@ function updateRaceLog(msg) {
       renderRaceLog();
     } else {
       pushLogEntry({
-        pre: "встряска: подмешаны свежие формулы",
+        pre: "shock: fresh formulas mixed in",
         cls: "log-shock",
       });
     }
   }
   state.wasShocking = msg.shock;
   if (msg.solved_now) {
-    pushLogEntry({ pre: "точное совпадение найдено", cls: "log-solved" });
+    pushLogEntry({ pre: "exact match found", cls: "log-solved" });
   } else if (msg.solved && msg.best.exact && msg.best.size < state.lastExactSize) {
     pushLogEntry({
-      pre: "усадка: формула короче —", text: `размер ${msg.best.size}`,
+      pre: "shrinking: a shorter formula —", text: `размер ${msg.best.size}`,
       cls: "log-shrink",
     });
   }
@@ -771,13 +772,13 @@ function updateRaceLog(msg) {
     // a 100 gen/s run doesn't turn the feed into an unreadable blur.
     if (!state.lastLogGen || msg.gen - state.lastLogGen >= 10) {
       pushLogEntry({
-        pre: "новая лучшая:", latex: astToLatex(msg.best.ast),
+        pre: "new best:", latex: astToLatex(msg.best.ast),
         text: `ошибка ${fmtPercent(msg.best.error)}`,
       });
       state.lastLogGen = msg.gen;
     }
   } else if (msg.new_best && msg.best.exact && !msg.solved_now) {
-    pushLogEntry({ pre: "новая лучшая:", latex: astToLatex(msg.best.ast) });
+    pushLogEntry({ pre: "new best:", latex: astToLatex(msg.best.ast) });
   }
 }
 
@@ -789,11 +790,11 @@ function renderTerms(best) {
   addCell(head, "th", "n");
   seq.forEach((_, i) => addCell(head, "th", String(i + 1)));
 
-  buildTermsRow($("termsTarget"), "должно быть", seq.map(fmtNum));
+  buildTermsRow($("termsTarget"), "expected", seq.map(fmtNum));
   const got = best.values === null
     ? seq.map(() => "—")
     : best.values.map(fmtNum);
-  buildTermsRow($("termsGot"), "получается", got);
+  buildTermsRow($("termsGot"), "got", got);
   const errRow = [];
   if (best.errors === null) {
     seq.forEach(() => errRow.push("—"));
@@ -801,7 +802,7 @@ function renderTerms(best) {
     best.errors.forEach((e) => errRow.push(e < 1e-9 ? "0" : fmtPercent(e)));
   }
   const errCells = [];
-  buildTermsRow($("termsErr"), "расхождение", errRow, errCells);
+  buildTermsRow($("termsErr"), "diff", errRow, errCells);
   if (best.errors !== null) {
     best.errors.forEach((e, i) => {
       if (e < 1e-9) errCells[i].classList.add("ok");
@@ -834,7 +835,7 @@ function applySolved(msg) {
   }
   state.lastRunSolved = true;
   setStatus("finished");
-  setChip("решено", "solved");
+  setChip("solved", "solved");
   $("resultsDot").hidden = false;
   
   if (state.settings) {
@@ -846,7 +847,7 @@ function applySolved(msg) {
     }
   }
   pushLogEntry({
-    pre: "решено:", latex: msg.formula ? astToLatex(msg.formula) : null,
+    pre: "solved:", latex: msg.formula ? astToLatex(msg.formula) : null,
     text: `${msg.generations} поколений, ${fmtTime(msg.time_s)}`,
     cls: "log-solved",
   });
@@ -868,7 +869,7 @@ function applySolved(msg) {
   note.appendChild(f);
   if (msg.shortest_text && msg.formula_text && msg.shortest_text !== msg.formula_text) {
     const short = document.createElement("span");
-    short.textContent = " короче: ";
+    short.textContent = " shorter: ";
     note.appendChild(short);
     const s2 = document.createElement("span");
     renderKatex(s2, "\\text{" + msg.shortest_text + "}", false);
@@ -934,11 +935,11 @@ function applyStatusMsg(msg) {
     if (state.isAutopilot) {
       btn.classList.remove("btn-positive");
       btn.classList.add("btn-danger");
-      btn.textContent = "Остановить автопилот";
+      btn.textContent = i18n.t("Stop autopilot");
     } else {
       btn.classList.add("btn-positive");
       btn.classList.remove("btn-danger");
-      btn.textContent = "Автопилот";
+      btn.textContent = i18n.t("Autopilot");
     }
   }
 
@@ -1005,27 +1006,27 @@ function alongPath(vertices, n) {
 /* One-stroke shape presets, same idea as the puzzle library in
    «Результаты» but for curves. Coordinates: unit square, y down. */
 const CURVE_PRESETS = [
-  { name: "Линия", pts: alongPath([{ x: 0.12, y: 0.5 }, { x: 0.88, y: 0.5 }], 30) },
-  { name: "Угол", pts: alongPath([{ x: 0.2, y: 0.15 }, { x: 0.2, y: 0.85 },
+  { name: "Line", pts: alongPath([{ x: 0.12, y: 0.5 }, { x: 0.88, y: 0.5 }], 30) },
+  { name: "Angle", pts: alongPath([{ x: 0.2, y: 0.15 }, { x: 0.2, y: 0.85 },
                                   { x: 0.85, y: 0.85 }], 48) },
-  { name: "Окружность", pts: Array.from({ length: 48 }, (_, i) => {
+  { name: "Circle", pts: Array.from({ length: 48 }, (_, i) => {
       const a = -Math.PI / 2 + (i / 47) * 2 * Math.PI;
       return { x: 0.5 + 0.35 * Math.cos(a), y: 0.5 + 0.35 * Math.sin(a) };
     }) },
-  { name: "Волна", pts: Array.from({ length: 60 }, (_, i) => {
+  { name: "Wave", pts: Array.from({ length: 60 }, (_, i) => {
       const t = i / 59;
       return { x: 0.1 + 0.8 * t, y: 0.5 + 0.25 * Math.sin(4 * Math.PI * t) };
     }) },
-  { name: "Зигзаг", pts: alongPath([{ x: 0.1, y: 0.25 }, { x: 0.3, y: 0.75 },
+  { name: "Zigzag", pts: alongPath([{ x: 0.1, y: 0.25 }, { x: 0.3, y: 0.75 },
                                     { x: 0.5, y: 0.25 }, { x: 0.7, y: 0.75 },
                                     { x: 0.9, y: 0.25 }], 60) },
-  { name: "Спираль", pts: Array.from({ length: 90 }, (_, i) => {
+  { name: "Spiral", pts: Array.from({ length: 90 }, (_, i) => {
       const t = i / 89;
       const a = -Math.PI / 2 + t * 2.5 * 2 * Math.PI;
       const r = 0.04 + 0.32 * t;
       return { x: 0.5 + r * Math.cos(a), y: 0.5 + r * Math.sin(a) };
     }) },
-  { name: "Звезда", pts: (() => {
+  { name: "Star", pts: (() => {
       const v = [];
       for (let k = 0; k < 10; k++) {
         const a = -Math.PI / 2 + k * Math.PI / 5;
@@ -1035,7 +1036,7 @@ const CURVE_PRESETS = [
       v.push({ ...v[0] });  // closed outline, still one stroke
       return alongPath(v, 70);
     })() },
-  { name: "Сердце", pts: Array.from({ length: 60 }, (_, i) => {
+  { name: "Heart", pts: Array.from({ length: 60 }, (_, i) => {
       const th = (i / 59) * 2 * Math.PI;
       // classic heart curve, rescaled to the unit square (y down)
       return { x: 0.5 + 0.02 * 16 * Math.sin(th) ** 3,
@@ -1083,10 +1084,10 @@ function syncCurveUI() {
   $("curveSmoothBtn").disabled = running;
   $("curveCanvas").classList.toggle("locked", running);
   const chip = $("curveChip");
-  if (state.status === "running") chip.textContent = "поиск идёт";
-  else if (state.status === "paused") chip.textContent = "пауза";
-  else if (state.status === "finished") chip.textContent = "завершено";
-  else chip.textContent = "нет прогона";
+  if (state.status === "running") chip.textContent = "searching";
+  else if (state.status === "paused") chip.textContent = "paused";
+  else if (state.status === "finished") chip.textContent = "finished";
+  else chip.textContent = "no run";
   const showLive = state.mode === "curve" && (running || state.status === "finished");
   $("curveEmpty").hidden = showLive;
   $("curveLive").hidden = !showLive;
@@ -1208,12 +1209,12 @@ function wireSavedDrawings() {
   });
   $("curveSaveBtn").addEventListener("click", async () => {
     if (!state.curveStrokes.length) {
-      alertErr("нечего сохранять: рисунок пуст");
+      alertErr("nothing to save: the drawing is empty");
       return;
     }
     const name = $("curveSaveName").value.trim();
     if (!name) {
-      alertErr("введите имя фигуры в поле слева от кнопки");
+      alertErr("type a shape name in the field left of the button");
       return;
     }
     try {
@@ -1233,7 +1234,7 @@ function wireSavedDrawings() {
       if (opt) sel.value = opt.value;
       $("curveDelBtn").disabled = false;
       $("curveSaveName").value = "";
-    } catch (e) { alertErr("не удалось сохранить: " + e.message); }
+    } catch (e) { alertErr(i18n.t("failed to save: ") + e.message); }
   });
   $("curveDelBtn").addEventListener("click", async () => {
     const opt = sel.selectedOptions[0];
@@ -1242,7 +1243,7 @@ function wireSavedDrawings() {
       const resp = await fetch(`/api/drawings/${opt.value}`, { method: "DELETE" });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       await loadSavedDrawings();
-    } catch (e) { alertErr("не удалось удалить: " + e.message); }
+    } catch (e) { alertErr(i18n.t("failed to delete: ") + e.message); }
   });
 }
 
@@ -1488,7 +1489,7 @@ function applyCurveGen(msg) {
          now - state.genTimestamps[0] > 2000) state.genTimestamps.shift();
   const span = (now - state.genTimestamps[0]) / 1000;
   const gps = state.genTimestamps.length > 1 && span > 0.3
-    ? fmtNum((state.genTimestamps.length - 1) / span) + " пок/с" : "—";
+    ? fmtNum((state.genTimestamps.length - 1) / span) + " g/s" : "—";
   const elapsed = state.runStartedAt ? fmtTime((now - state.runStartedAt) / 1000) : "—";
   $("curveSpeedTime").textContent = `${gps} · ${elapsed}`;
 
@@ -1588,7 +1589,7 @@ function renderCurveLog() {
     const g = document.createElement("span");
     g.className = "race-log-gen num";
     g.textContent = e.gen === null || e.gen === undefined
-      ? "—" : "пок. " + (e.gen + 1);
+      ? "—" : "gen. " + (e.gen + 1);
     li.appendChild(g);
     if (e.pre) {
       const pre = document.createElement("span");
@@ -1619,20 +1620,20 @@ function updateCurveRaceLog(msg) {
       renderCurveLog();
     } else {
       pushCurveLogEntry({
-        pre: "встряска: подмешаны свежие пары",
+        pre: "shock: fresh pairs mixed in",
         cls: "log-shock",
       });
     }
   }
   state.wasCurveShocking = msg.shock;
   if (msg.solved_now) {
-    pushCurveLogEntry({ pre: "порог взят (ошибка < 2%)", cls: "log-solved" });
+    pushCurveLogEntry({ pre: "threshold met (error < 2%)", cls: "log-solved" });
   } else if (msg.new_best) {
     // throttle like Поиск: a 100 gen/s run must not blur the feed
     if (!state.lastCurveLogGen || msg.gen - state.lastCurveLogGen >= 10) {
       const multi = msg.best.x_text.length > 1;
       pushCurveLogEntry({
-        pre: multi ? "новые лучшие пары:" : "новая лучшая пара:",
+        pre: multi ? "new best pairs:" : "new best pair:",
         latex: `x(t)=${astToLatexT(astList(msg.best.x_ast)[0])},\\ y(t)=${astToLatexT(astList(msg.best.y_ast)[0])}`,
         text: `ошибка ${fmtPercent(msg.best.error)}`
           + (multi ? ` · штрихов ${msg.best.x_text.length}` : ""),
@@ -1685,7 +1686,7 @@ function renderCurveCheck(best) {
     const d = missAt(t);
     return d === null ? "—" : fmtPercent(d);
   });
-  buildTermsRow($("curveTermsErr"), "промах", errs, errCells);
+  buildTermsRow($("curveTermsErr"), "miss", errs, errCells);
   errs.forEach((e, i) => {
     if (parseFloat(e.replace("%", "")) < 2) errCells[i].classList.add("ok");
   });
@@ -1728,7 +1729,7 @@ function cancelCurvePlayback() {
 function applyCurveSolved(msg) {
   state.lastRunSolved = true;
   setStatus("finished");
-  $("curveChip").textContent = "решено";
+  $("curveChip").textContent = "solved";
   $("curveChip").className = "chip solved";
   if (state.settings) {
     if (state.settings.notify_sound && state.settings.notify_volume > 0) {
@@ -1749,11 +1750,11 @@ async function startCurveRun(event) {
   stopTitleFlash();
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   if (!totalCurvePoints()) {
-    alertErr("нарисуйте фигуру");
+    alertErr("draw a shape");
     return;
   }
   if (state.ops.size === 0) {
-    alertErr("не выбрана ни одна операция");
+    alertErr("no operation is selected");
     return;
   }
   const seedRaw = $("curveSeedInput").value.trim();
@@ -1761,7 +1762,7 @@ async function startCurveRun(event) {
   if (seedRaw !== "") {
     seed = Number(seedRaw);
     if (!Number.isInteger(seed) || seed < 0) {
-      alertErr("seed должен быть целым неотрицательным числом");
+      alertErr("the seed must be a non-negative integer");
       return;
     }
   }
@@ -1781,7 +1782,7 @@ async function startCurveRun(event) {
   const btn = $("curveStartBtn");
   const originalText = btn.innerHTML;
   btn.disabled = true;
-  btn.textContent = "Запуск…";
+  btn.textContent = i18n.t("Starting…");
   try {
     const status = await api("/api/run", body);
     resetCurveState();
@@ -1792,7 +1793,7 @@ async function startCurveRun(event) {
     applyStatusMsg(status);
     scheduleCurveUpdate();
   } catch (e) {
-    alertErr("не удалось запустить: " + e.message);
+    alertErr(i18n.t("failed to start: ") + e.message);
   } finally {
     btn.innerHTML = originalText;
     syncCurveUI();
@@ -1800,6 +1801,7 @@ async function startCurveRun(event) {
 }
 
 async function loadCurves() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/curves");
   const rows = $("curveRows");
   rows.innerHTML = "";
@@ -1808,7 +1810,7 @@ async function loadCurves() {
     const td = document.createElement("td");
     td.colSpan = 5;
     td.className = "list-empty";
-    td.textContent = "Галерея пуста: завершённые прогоны появятся здесь.";
+    td.textContent = "Gallery is empty: finished runs will appear here.";
     tr.appendChild(td);
     rows.appendChild(tr);
     return;
@@ -1816,7 +1818,7 @@ async function loadCurves() {
   for (const c of data.curves) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Вернуть этот рисунок на холст";
+    tr.title = "Put this drawing back on the canvas";
     tr.addEventListener("click", () => {
       const strokes = entryStrokes(c);
       if (!strokes.length || !strokes[0].length) return;
@@ -1874,13 +1876,13 @@ function connectWS() {
           refreshAll();
         } else {
           setStatus("finished");
-          setChip(msg.reason === "autopilot_done" ? "автопилот завершен" : "остановлено", "finished");
+          setChip(msg.reason === "autopilot_done" ? "autopilot finished" : "stopped", "finished");
           if (msg.is_autopilot === false) {
             state.isAutopilot = false;
             const btn = $("autopilotBtn");
             btn.classList.add("btn-positive");
             btn.classList.remove("btn-danger");
-            btn.textContent = "Автопилот";
+            btn.textContent = i18n.t("Autopilot");
           }
           refreshAll();
         }
@@ -1892,7 +1894,7 @@ function connectWS() {
 function setConn(ok) {
   state.wsOk = ok;
   $("connDot").className = "dot " + (ok ? "on" : "off");
-  $("connText").textContent = ok ? "сервер на связи" : "нет связи с сервером";
+  $("connText").textContent = ok ? "server connected" : "no connection to the server";
 }
 
 /* ---------- REST ---------- */
@@ -1913,6 +1915,7 @@ async function api(path, body) {
 let PUZZLE_CACHE = [];
 
 async function loadPuzzles() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/puzzles");
   PUZZLE_CACHE = data.puzzles;
   const select = $("puzzleSelect");
@@ -1926,7 +1929,7 @@ async function loadPuzzles() {
   const searchWrap = document.createElement("div");
   searchWrap.className = "puzzle-search-wrap";
   searchWrap.innerHTML = `
-    <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Поиск последовательности...">
+    <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Search sequences…">
     <div class="puzzle-filters">
       <select id="filterStatus" class="input puzzle-filter-select">
         <option value="all">Все</option>
@@ -1945,11 +1948,11 @@ async function loadPuzzles() {
 
   const own = document.createElement("option");
   own.value = "";
-  own.textContent = "— своя последовательность —";
+  own.textContent = i18n.t("— custom sequence —");
   select.appendChild(own);
   
-  const tiers = { 1: "T1 · линейные", 2: "T2 · степени", 3: "T3 · смешанные",
-                  4: "T4 · новые операции", 5: "T5 · очень сложные" };
+  const tiers = { 1: "T1 · linear", 2: "T2 · powers", 3: "T3 · mixed",
+                  4: "T4 · new operations", 5: "T5 · very hard" };
                   
   for (const tier of [1, 2, 3, 4, 5]) {
     const group = document.createElement("optgroup");
@@ -2084,11 +2087,11 @@ function updatePuzzleLabel() {
   const val = $("puzzleSelect").value;
   const label = $("puzzleSelectLabel");
   if (!val) {
-    label.textContent = "— своя последовательность —";
+    label.textContent = i18n.t("— custom sequence —");
     $("puzzleSelectMenu").querySelectorAll(".modern-select-item").forEach(el => el.classList.remove("active"));
   } else {
     const p = PUZZLE_CACHE.find(x => x.id === val);
-    label.textContent = p ? p.name : "— своя последовательность —";
+    label.textContent = p ? p.name : i18n.t("— custom sequence —");
     $("puzzleSelectMenu").querySelectorAll(".modern-select-item").forEach(el => {
       el.classList.toggle("active", el.dataset.id === val);
     });
@@ -2115,7 +2118,7 @@ function updateOpsHint() {
   }
   el.textContent = `для «${p.name}» требуются: ` +
     missing.map((t) => TOKEN_LABELS[t] || t).join(", ") +
-    " (сейчас отключены)";
+    " (currently disabled)";
   el.hidden = false;
 }
 
@@ -2124,7 +2127,7 @@ function renderReferenceNote(text, size) {
   note.classList.add("show");
   note.innerHTML = "";
   const label = document.createElement("span");
-  label.textContent = "Эталон: ";
+  label.textContent = i18n.t("Reference: ");
   note.appendChild(label);
   const ref = document.createElement("span");
   renderKatex(ref, refToLatex(text), false);
@@ -2135,7 +2138,7 @@ function renderReferenceNote(text, size) {
     meta.style.marginLeft = "12px";
     meta.style.color = "var(--muted)";
     meta.style.fontSize = "12px";
-    meta.title = "Точный размер формулы (с учётом сложности знаков и разрядности чисел).";
+    meta.title = "The exact formula size (counting sign complexity and number digits).";
     meta.textContent = `(размер ${size})`;
     note.appendChild(meta);
   }
@@ -2155,6 +2158,7 @@ function markPuzzle(p) {
 }
 
 async function loadLibrary() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/history");
   const puzzles = await api("/api/puzzles");
   const history = data.history;
@@ -2184,7 +2188,7 @@ async function loadLibrary() {
   for (const p of puzzles.puzzles) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Запустить поиск этой последовательности";
+    tr.title = "Run a search for this sequence";
     tr.addEventListener("click", () => {
       $("puzzleSelect").value = p.id;
       $("seqInput").value = p.terms.join(" ");
@@ -2214,7 +2218,7 @@ async function loadLibrary() {
     const title = document.createElement("td");
     const dot = document.createElement("span");
     dot.className = `diff-dot ${p.difficulty || "unseen"}`;
-    dot.title = p.difficulty === "easy" ? "Легко" : p.difficulty === "medium" ? "Средне" : p.difficulty === "hard" ? "Сложно" : "Ещё не решено";
+    dot.title = p.difficulty === "easy" ? "Easy" : p.difficulty === "medium" ? "Medium" : p.difficulty === "hard" ? "Hard" : "Not solved yet";
     title.appendChild(dot);
     title.innerHTML += `<b>${p.name}</b><br><span style="color:var(--faint);font-size:12px; margin-left: 14px;">${p.terms.join(" ")}</span>`;
     tr.appendChild(title);
@@ -2236,7 +2240,7 @@ async function loadLibrary() {
         
         const badge = document.createElement("span");
         badge.className = "ref-badge";
-        badge.textContent = "короче";
+        badge.textContent = "shorter";
         badge.title = `Короче эталона (${h.size} против ${refSize})`;
         result.appendChild(badge);
       }
@@ -2282,6 +2286,7 @@ async function loadLibrary() {
 }
 
 async function loadMySeqs() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/history");
   const rows = $("mySeqRows");
   rows.innerHTML = "";
@@ -2312,7 +2317,7 @@ async function loadMySeqs() {
     const td = document.createElement("td");
     td.colSpan = 5;
     td.className = "list-empty";
-    td.textContent = "Пользовательские последовательности пока отсутствуют.";
+    td.textContent = "No custom sequences yet.";
     tr.appendChild(td);
     rows.appendChild(tr);
     return;
@@ -2328,7 +2333,7 @@ async function loadMySeqs() {
     tr.dataset.terms = JSON.stringify(h.sequence);
     tr.dataset.ref = h.reference || "";
     tr.dataset.solved = h.solved ? "true" : "false";
-    tr.title = "Запустить поиск заново";
+    tr.title = "Run the search again";
     tr.addEventListener("click", () => {
       $("seqInput").value = h.sequence.join(" ");
       $("refInput").value = h.reference || "";
@@ -2385,6 +2390,7 @@ async function loadMySeqs() {
 }
 
 async function loadCuriosities() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/curiosities");
   const rows = $("curioRows");
   rows.innerHTML = "";
@@ -2393,7 +2399,7 @@ async function loadCuriosities() {
     const td = document.createElement("td");
     td.colSpan = 5;
     td.className = "list-empty";
-    td.textContent = "Курьёзов пока нет: почти-правильные монстры появятся после первых прогонов.";
+    td.textContent = "No curiosities yet: almost-correct monsters will appear after the first runs.";
     tr.appendChild(td);
     rows.appendChild(tr);
     return;
@@ -2401,7 +2407,7 @@ async function loadCuriosities() {
   for (const c of data.curiosities) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Запустить поиск этой последовательности";
+    tr.title = "Run a search for this sequence";
     tr.addEventListener("click", () => {
       $("seqInput").value = c.sequence.join(" ");
       $("refInput").value = "";
@@ -2427,6 +2433,7 @@ async function loadCuriosities() {
 /* Shape presets table: best curve run per preset (like «Библиотека»,
    but for the Кривые tab). Click = load the drawing onto the canvas. */
 async function loadShapes() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/curves");
   const rows = $("shapeRows");
   rows.innerHTML = "";
@@ -2442,7 +2449,7 @@ async function loadShapes() {
     const c = best[preset.name];
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Открыть эту фигуру на вкладке «Кривые»";
+    tr.title = "Open this shape on the Curves tab";
     tr.addEventListener("click", () => {
       const src = c ? entryStrokes(c) : [preset.pts];
       state.curveStrokes = src.map((stroke) =>
@@ -2493,11 +2500,12 @@ async function loadShapes() {
    close ("polygon instead of a circle"). Click = load the drawing onto
    the curve canvas, like the shapes table. */
 async function loadCurveCuriosities() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/curve_curiosities");
   if (data.threshold) {
     $("curveCurioCaption").textContent =
-      "Галерея почти-попаданий: ошибка между "
-      + fmtPercent(data.threshold.min) + " и " + fmtPercent(data.threshold.max);
+      i18n.t("Near-hit gallery: error between ")
+      + fmtPercent(data.threshold.min) + " and " + fmtPercent(data.threshold.max);
   }
   const rows = $("curveCurioRows");
   rows.innerHTML = "";
@@ -2506,7 +2514,7 @@ async function loadCurveCuriosities() {
     const td = document.createElement("td");
     td.colSpan = 4;
     td.className = "list-empty";
-    td.textContent = "Кривых-курьёзов пока нет: появятся после незакрытых прогонов, где кривая почти попала.";
+    td.textContent = "No curve curiosities yet: they will appear after unsolved runs where the curve nearly hit.";
     tr.appendChild(td);
     rows.appendChild(tr);
     return;
@@ -2514,7 +2522,7 @@ async function loadCurveCuriosities() {
   for (const c of data.curiosities) {
     const tr = document.createElement("tr");
     tr.className = "clickable-row";
-    tr.title = "Открыть этот рисунок на вкладке «Кривые»";
+    tr.title = "Open this drawing on the Curves tab";
     tr.addEventListener("click", () => {
       state.curveStrokes = entryStrokes(c).map((stroke) =>
         stroke.map((p) => Array.isArray(p) ? { x: p[0], y: p[1] } : { ...p }));
@@ -2526,10 +2534,10 @@ async function loadCurveCuriosities() {
       $("ptabCurves").click();
     });
     tr.dataset.search =
-      ((c.preset || "свой рисунок") + " " + (c.x_text || []).join(" ")
+      ((c.preset || "custom drawing") + " " + (c.x_text || []).join(" ")
        + " " + (c.y_text || []).join(" ") + " " + c.error).toLowerCase();
 
-    addCell(tr, "td", c.preset || "свой рисунок");
+    addCell(tr, "td", c.preset || "custom drawing");
     const f = addCell(tr, "td", "");
     const xs = astList(c.x_ast);
     const ys = astList(c.y_ast);
@@ -2607,6 +2615,7 @@ function refreshAll() {
 const TIER_LABELS = { 1: "T1", 2: "T2", 3: "T3", 4: "T4", 5: "T5" };
 
 async function loadStats() {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const data = await api("/api/stats");
   const headline = $("statsHeadline");
   const tiers = $("statsTiers");
@@ -2616,7 +2625,7 @@ async function loadStats() {
     const cell = document.createElement("div");
     cell.className = "stats-tier" + (t.solved === t.total ? " done" : "");
     cell.dataset.tip = t.solved === t.total
-      ? "Все последовательности уровня решены"
+      ? "Every sequence of this tier is solved"
       : `Решено ${t.solved} из ${t.total} последовательностей этого уровня`;
     const name = document.createElement("span");
     name.className = "stats-tier-name";
@@ -2636,10 +2645,10 @@ async function loadStats() {
 
 function parseTerms(text) {
   const parts = text.split(/[\s,;]+/).filter(Boolean);
-  if (!parts.length) throw new Error("последовательность не заполнена");
+  if (!parts.length) throw new Error("the sequence is empty");
   const terms = parts.map(Number);
-  if (terms.some((t) => !isFinite(t))) throw new Error("не все значения являются числами");
-  if (terms.length < 2 || terms.length > 32) throw new Error("допустимая длина последовательности — от 2 до 32 членов");
+  if (terms.some((t) => !isFinite(t))) throw new Error("not all values are numbers");
+  if (terms.length < 2 || terms.length > 32) throw new Error("a sequence must be 2 to 32 members long");
   return terms;
 }
 
@@ -2651,7 +2660,7 @@ async function startRun(event) {
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   
   if (state.ops.size === 0) {
-    alertErr("не выбрана ни одна операция");
+    alertErr("no operation is selected");
     return;
   }
   
@@ -2663,7 +2672,7 @@ async function startRun(event) {
   if (seedRaw !== "") {
     seed = Number(seedRaw);
     if (!Number.isInteger(seed) || seed < 0) {
-      alertErr("seed должен быть целым неотрицательным числом");
+      alertErr("the seed must be a non-negative integer");
       return;
     }
   }
@@ -2706,7 +2715,7 @@ async function startRun(event) {
     applyStatusMsg(status);
     scheduleChartUpdate();
   } catch (e) {
-    alertErr("не удалось запустить: " + e.message);
+    alertErr(i18n.t("failed to start: ") + e.message);
   } finally {
     startBtn.innerHTML = originalText;
     startBtn.disabled = state.status === "running" || state.status === "paused";
@@ -2714,12 +2723,12 @@ async function startRun(event) {
 }
 
 function alertErr(message) {
-  setChip("ошибка", "error");
+  setChip("error", "error");
   // inline, dismissible — a hover-only chip title made failures invisible
   for (const id of ["errorNote", "curveErrorNote"]) {
     const el = $(id);
     if (!el) continue;
-    el.textContent = message + "  (нажмите, чтобы скрыть)";
+    el.textContent = message + "  (click to hide)";
     el.hidden = false;
     el.onclick = () => { el.hidden = true; };
   }
@@ -2734,7 +2743,7 @@ async function control(action) {
       const btn = $("autopilotBtn");
       btn.classList.add("btn-positive");
       btn.classList.remove("btn-danger");
-      btn.textContent = "Автопилот";
+      btn.textContent = i18n.t("Autopilot");
     }
     // The server saves the best unsolved formula on pause. Refresh the
     // tables immediately so the user sees the progress without waiting.
@@ -2773,10 +2782,10 @@ async function copyBestFormula() {
 }
 
 const RESULT_META = {
-  library: "Все последовательности из библиотеки: эталон и лучший найденный результат (зелёный — решено, оранжевый — пока только приближение)",
-  shapes: "Фигуры-заготовки из вкладки «Кривые»: лучший результат по каждой (клик — вернуть рисунок на холст)",
-  myseqs: "Введённые вами последовательности, лучшие найденные формулы и ошибки",
-  curio: "Почти правильные, но громоздкие монстры — следы блуждания эволюции",
+  library: "Every library sequence: the reference and the best result found (green — solved, orange — an approximation so far)",
+  shapes: "Preset shapes from the Curves tab: the best result for each (click to put the drawing back)",
+  myseqs: "Your own sequences, the best formulas found, and their errors",
+  curio: "Almost-correct but bulky monsters — traces of evolution's wandering",
 };
 
 /* ---------- settings (Настройки tab) ---------- */
@@ -2849,9 +2858,9 @@ async function saveSettings(event) {
     state.settingDefaults = data.defaults;
     fillSettingsForm();
     applySpeedMax();
-    flashSettingsMeta("сохранено — применяется к следующим запускам");
+    flashSettingsMeta("saved — applies to the next runs");
   } catch (e) {
-    alertErr("не удалось сохранить настройки: " + e.message);
+    alertErr(i18n.t("failed to save settings: ") + e.message);
   }
 }
 
@@ -2863,9 +2872,9 @@ async function resetSettings() {
     state.settingDefaults = data.defaults;
     fillSettingsForm();
     applySpeedMax();
-    flashSettingsMeta("настройки сброшены к значениям по умолчанию");
+    flashSettingsMeta("settings reset to their defaults");
   } catch (e) {
-    alertErr("не удалось сбросить настройки: " + e.message);
+    alertErr(i18n.t("failed to reset settings: ") + e.message);
   }
 }
 
@@ -2875,7 +2884,7 @@ function flashSettingsMeta(text) {
   el.classList.add("ok");
   clearTimeout(flashSettingsMeta.timer);
   flashSettingsMeta.timer = setTimeout(() => {
-    el.textContent = "применяются к следующим запускам, хранятся локально";
+    el.textContent = "apply to the next runs, stored locally";
     el.classList.remove("ok");
   }, 2500);
 }
@@ -2976,7 +2985,7 @@ function startTitleFlash() {
   const original = document.title;
   let flash = false;
   titleFlashTimer = setInterval(() => {
-    document.title = flash ? original : "✅ Решено! — seq2formula";
+    document.title = flash ? original : "Solved! — seq2formula";
     flash = !flash;
   }, 1000);
 }
@@ -2985,7 +2994,7 @@ function stopTitleFlash() {
   if (titleFlashTimer) {
     clearInterval(titleFlashTimer);
     titleFlashTimer = null;
-    document.title = "seq2formula — поиск формулы";
+    document.title = "seq2formula — formula search";
   }
 }
 
@@ -3013,7 +3022,7 @@ function bindHotkeys() {
       const next = Math.max(Number(slider.min),
                             Math.min(Number(slider.max), Number(slider.value) + step));
       slider.value = String(next);
-      $("speedValue").textContent = next + " поколений/с";
+      $("speedValue").textContent = next + " generations/s";
       setSpeed(next);
       e.preventDefault();
     } else if (e.key === "Escape") {
@@ -3102,7 +3111,7 @@ function bindControls() {
     try {
       const data = await api("/api/drawings");
       if (!data.drawings.length) {
-        alertErr("сохранённых рисунков пока нет");
+        alertErr("no saved drawings yet");
         return;
       }
       const blob = new Blob([JSON.stringify(data.drawings, null, 2)],
@@ -3114,7 +3123,7 @@ function bindControls() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alertErr("не удалось скачать рисунки: " + err.message);
+      alertErr(i18n.t("failed to download drawings: ") + err.message);
     }
   });
   $("curveSeedInput").addEventListener("input", (e) => {
@@ -3147,7 +3156,7 @@ function bindControls() {
   });
   let speedTimer = null;
   $("speedRange").addEventListener("input", (e) => {
-    $("speedValue").textContent = e.target.value + " поколений/с";
+    $("speedValue").textContent = e.target.value + " generations/s";
     clearTimeout(speedTimer);
     speedTimer = setTimeout(() => setSpeed(Number(e.target.value)), 200);
   });
@@ -3308,7 +3317,7 @@ function bindControls() {
     try {
       await api("/api/autopilot", { items, gens, ops: [...state.ops] });
     } catch (err) {
-      alertErr("не удалось запустить автопилот: " + err.message);
+      alertErr(i18n.t("failed to start autopilot: ") + err.message);
     }
   });
 
@@ -3324,7 +3333,7 @@ function bindControls() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alertErr("не удалось скачать историю: " + err.message);
+      alertErr(i18n.t("failed to download history: ") + err.message);
     }
   });
 
@@ -3407,3 +3416,19 @@ refreshAll();
 loadSettings().catch(() => {});
 connectWS();
 setStatus("idle");
+i18n.ready.then(() => {
+  if (i18n.lang !== "en") i18n.apply();
+  // settings -> interface language select (one entry per locale folder)
+  const sel = document.getElementById("setLang");
+  if (sel) {
+    const names = { en: "English", ru: "Русский" };
+    for (const code of i18n.locales) {
+      const opt = document.createElement("option");
+      opt.value = code;
+      opt.textContent = names[code] || code;
+      sel.appendChild(opt);
+    }
+    sel.value = i18n.lang;
+    sel.onchange = () => i18n.set(sel.value);
+  }
+});

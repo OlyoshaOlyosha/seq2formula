@@ -61,7 +61,7 @@ function astToLatex(ast) {
   }
   if (ast.t === "if") {
     // piecewise fork: the cases environment draws its own left brace
-    return `\\begin{cases}${astToLatex(ast.a)} & \\text{если } ${astToLatex(ast.c)} \\\\ ${astToLatex(ast.b)} & \\text{иначе}\\end{cases}`;
+    return `\\begin{cases}${astToLatex(ast.a)} & \\text{if } ${astToLatex(ast.c)} \\\\ ${astToLatex(ast.b)} & \\text{otherwise}\\end{cases}`;
   }
   const L = astToLatex(ast.l);
   const R = astToLatex(ast.r);
@@ -173,8 +173,8 @@ function renderKpis(g) {
   // progressive grammar stage: 0 = base alphabet, 1 = +functions,
   // 2 = +piecewise/specials (the full enabled grammar)
   $("kpiStage").textContent =
-    s.stage === 1 ? "база + функции"
-    : s.stage === 2 ? "полная" : "база";
+    s.stage === 1 ? "base + functions"
+    : s.stage === 2 ? "full" : "base";
   $("kpiErr").textContent =
     (s.best_error != null)
       ? (s.best_error * 100).toFixed(2) + "%" : "—";
@@ -182,7 +182,7 @@ function renderKpis(g) {
   $("kpiH").textContent = s.entropy != null ? s.entropy.toFixed(2) : "—";
   $("kpiValid").textContent =
     s.valid_frac != null ? Math.round(s.valid_frac * 100) + "%" : "—";
-  $("kpiGps").textContent = state.gps != null ? state.gps.toFixed(1) + "/с" : "—";
+  $("kpiGps").textContent = state.gps != null ? state.gps.toFixed(1) + "/s" : "—";
 }
 
 function renderBest(g) {
@@ -192,9 +192,9 @@ function renderBest(g) {
     return;
   }
   renderKatex($("bestFormula"), astToLatex(g.best.ast));
-  const bits = [`ошибка ${(g.best.error * 100).toFixed(2)}%`,
-                `размер ${g.best.size}`];
-  if (g.best.exact) bits.push("точное попадание");
+  const bits = [i18n.t(`error ${(g.best.error * 100).toFixed(2)}%`),
+                i18n.t(`size ${g.best.size}`)];
+  if (g.best.exact) bits.push("exact hit");
   $("bestMeta").textContent = bits.join(" · ");
 }
 
@@ -202,7 +202,7 @@ function renderTokens(g) {
   const probs = g && g.stats && g.stats.root_probs;
   const el = $("tokBars");
   if (!probs || !probs.length) {
-    el.innerHTML = '<div style="color:var(--faint);font-size:12px">нет данных</div>';
+    el.innerHTML = '<div style="color:var(--faint);font-size:12px">no data</div>';
     return;
   }
   const max = probs[0][1] || 1;
@@ -216,6 +216,7 @@ function renderTokens(g) {
 }
 
 function renderTop5(g) {
+  if (window.i18n && i18n.lang !== "en") i18n.apply();
   const tb = $("top5Table").querySelector("tbody");
   tb.innerHTML = (g && g.top ? g.top : []).map((row) => `
     <tr><td class="num">${(row.error != null ? (row.error * 100).toFixed(2) : "—")}%</td>
@@ -227,13 +228,13 @@ function renderStatus(snap) {
   const running = snap.status === "running" || snap.status === "paused";
   badge.hidden = !(running || snap.solved);
   if (snap.solved) {
-    badge.textContent = "решено";
+    badge.textContent = "solved";
     badge.className = "badge-solved";
   } else if (snap.status === "running") {
-    badge.textContent = "идёт обучение";
+    badge.textContent = "training";
     badge.className = "badge-run";
   } else {
-    badge.textContent = "пауза";
+    badge.textContent = "paused";
     badge.className = "badge-shock";  // amber: paused matches the main chip
   }
 }
@@ -244,7 +245,7 @@ let ws;
 function setConn(ok) {
   const el = $("conn");
   if (el) el.classList.toggle("bad", !ok);
-  $("connText").textContent = ok ? "на связи" : "нет связи с сервером";
+  $("connText").textContent = ok ? "connected" : "no connection to the server";
 }
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
@@ -256,7 +257,7 @@ function connect() {
     if (msg.type === "solved" || msg.type === "finished") {
       $("statusBadge").hidden = false;
       $("statusBadge").className = "badge-solved";
-      $("statusBadge").textContent = msg.type === "solved" ? "решено" : "завершено";
+      $("statusBadge").textContent = msg.type === "solved" ? "solved" : "finished";
       if (msg.type === "solved") flashSolved();
       return;
     }
@@ -282,16 +283,16 @@ function applySnapshot(snap) {
   }
   renderStatus(snap);
   $("runInfo").innerHTML = snap.puzzle
-    ? `<div class="stat-line"><span>пазл</span><b>${snap.puzzle.name}</b></div>
-       <div class="stat-line"><span>сид</span><b class="num">${snap.seed ?? "—"}</b></div>`
+    ? `<div class="stat-line"><span>${i18n.t("puzzle")}</span><b>${snap.puzzle.name}</b></div>
+       <div class="stat-line"><span>Seed</span><b class="num">${snap.seed ?? "—"}</b></div>`
     : "";
 }
 
 let flashTimer;
 function flashSolved() {
-  document.title = "Решено — seq2formula";
+  document.title = "Solved — seq2formula";
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { document.title = "seq2formula — Нейро"; }, 4000);
+  flashTimer = setTimeout(() => { document.title = "seq2formula — Neuro"; }, 4000);
 }
 
 /* ---------- controls ---------- */
@@ -313,7 +314,7 @@ async function startRun() {
   const raw = $("termsInput").value.trim().replace(/,/g, " ");
   const terms = raw.split(/\s+/).filter(Boolean).map(Number);
   if (terms.length < 2 || terms.some((v) => !Number.isFinite(v))) {
-    alert("Введите хотя бы два числа через пробел");
+    alert("Enter at least two numbers separated by spaces");
     return;
   }
   resetData();
@@ -325,7 +326,7 @@ async function startRun() {
       seed: seedRaw === "" ? undefined : Number(seedRaw),
       speed: Number($("speedSlider").value),
     });
-  } catch (e) { alert("Не удалось запустить: " + e.message); }
+  } catch (e) { alert("failed to start: " + e.message); }
 }
 
 function resetData() {
@@ -342,7 +343,7 @@ function wireControls() {
   $("btnStep").onclick = () => post("/api/control", { action: "step" });
   $("btnStop").onclick = () => post("/api/control", { action: "stop" });
   $("speedSlider").oninput = (e) => {
-    $("speedLabel").textContent = `${e.target.value}/с`;
+    $("speedLabel").textContent = `${e.target.value}/s`;
   };
   $("speedSlider").onchange = (e) =>
     post("/api/speed", { gps: Number(e.target.value) }).catch(() => {});
@@ -368,7 +369,7 @@ setInterval(() => {
   const dt = (now - state.lastGenAt) / 1000;
   if (state.status === "running" && dt > 0 && dt < 3 && state.lastGenAt) {
     state.gps = 1 / dt;
-    $("kpiGps").textContent = state.gps.toFixed(1) + "/с";
+    $("kpiGps").textContent = state.gps.toFixed(1) + "/s";
   } else if (state.status !== "running") {
     state.gps = null;
     $("kpiGps").textContent = "—";

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>seq2formula — поиск формулы</title>
+<title>seq2formula — formula search</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
 <link rel="stylesheet" href="/static/style.css">
@@ -17,201 +17,201 @@
     </svg>
     <span class="brand-name">seq2formula</span>
   </div>
-  <nav class="pagetabs" role="tablist" aria-label="Разделы">
-    <button class="ptab" id="ptabSearch" role="tab" aria-selected="true">Поиск</button>
-    <button class="ptab" id="ptabCurves" role="tab" aria-selected="false">Кривые</button>
+  <nav class="pagetabs" role="tablist" aria-label="Sections">
+    <button class="ptab" id="ptabSearch" role="tab" aria-selected="true">Search</button>
+    <button class="ptab" id="ptabCurves" role="tab" aria-selected="false">Curves</button>
     <button class="ptab" id="ptabNeuro" aria-current="page"
-            title="Отдельная страница нейро-движка"
-            onclick="location.href='/neuro'">Нейро</button>
+            title="Standalone neuro engine page"
+            onclick="location.href='/neuro'">Neuro</button>
     <button class="ptab" id="ptabResults" role="tab" aria-selected="false">
-      Результаты <span class="tab-dot" id="resultsDot" hidden></span>
+      Results <span class="tab-dot" id="resultsDot" hidden></span>
     </button>
-    <button class="ptab" id="ptabSettings" role="tab" aria-selected="false">Настройки</button>
+    <button class="ptab" id="ptabSettings" role="tab" aria-selected="false">Settings</button>
   </nav>
-  <div class="topbar-status" id="connStatus"><span class="dot" id="connDot"></span><span id="connText">подключение…</span></div>
+  <div class="topbar-status" id="connStatus"><span class="dot" id="connDot"></span><span id="connText">connecting…</span></div>
 </header>
 
 <main class="canvas">
-  <section id="paneSearch" aria-label="Поиск">
+  <section id="paneSearch" aria-label="Search">
     <!-- ===== Run control ===== -->
-    <section class="panel control-panel" aria-label="Управление поиском">
+    <section class="panel control-panel" aria-label="Search controls">
       <form id="runForm" class="run-form">
         <label class="field field-seq">
-          <span class="field-label">Последовательность</span>
+          <span class="field-label">Sequence</span>
           <input id="seqInput" class="input" type="text" inputmode="numeric"
-                 placeholder="например: 1 2 4 8 16" autocomplete="off"
+                 placeholder="e.g.: 1 2 4 8 16" autocomplete="off"
                  aria-describedby="seqHint">
-          <span class="field-hint" id="seqHint">2–32 числа через пробел или запятую</span>
+          <span class="field-hint" id="seqHint">2–32 numbers, space- or comma-separated</span>
         </label>
         <div class="field field-puzzle">
-          <span class="field-label">Или последовательность из библиотеки</span>
+          <span class="field-label">Or a sequence from the library</span>
           <!-- Hidden native select: keeps backward compatibility with the existing JS logic -->
           <select id="puzzleSelect" style="display: none;">
-            <option value="">— своя последовательность —</option>
+            <option value="">— custom sequence —</option>
           </select>
           <!-- Custom UI for the dropdown -->
           <button type="button" class="input modern-select-trigger" id="puzzleSelectTrigger" aria-haspopup="listbox" aria-expanded="false">
-            <span id="puzzleSelectLabel">— своя последовательность —</span>
+            <span id="puzzleSelectLabel">— custom sequence —</span>
             <svg class="modern-select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div class="modern-select-menu" id="puzzleSelectMenu" role="listbox" hidden>
             <div class="puzzle-search-wrap">
-              <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Поиск последовательности...">
+              <input type="search" id="puzzleSearch" class="input puzzle-search" placeholder="Search sequences…">
             </div>
           </div>
-          <span class="field-hint">65 последовательностей, пять уровней сложности</span>
+          <span class="field-hint">65 sequences, five difficulty levels</span>
         </div>
         <label class="field field-ref">
-          <span class="field-label">Эталонная формула (необязательно)</span>
+          <span class="field-label">Reference formula (optional)</span>
           <input id="refInput" class="input" type="text"
-                 placeholder="например: 2^n или (n+1)/2" autocomplete="off"
+                 placeholder="e.g.: 2^n or (n+1)/2" autocomplete="off"
                  aria-describedby="refHint">
-          <span class="field-hint" id="refHint">своя формула-эталон — покажем её во время поиска для сравнения</span>
+          <span class="field-hint" id="refHint">your own reference formula — shown during the search for comparison</span>
         </label>
       </form>
       <div class="run-controls" id="runControls">
-        <div class="control-group" role="group" aria-label="Управление поиском">
+        <div class="control-group" role="group" aria-label="Search controls">
           <button type="submit" form="runForm" class="btn btn-primary" id="startBtn">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-            Запустить
+            Run
           </button>
-          <button class="btn" id="pauseBtn" aria-label="Пауза" disabled>
+          <button class="btn" id="pauseBtn" aria-label="Pause" disabled>
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
-            <span id="pauseLabel">Пауза</span>
+            <span id="pauseLabel">Pause</span>
           </button>
-          <button class="btn" id="stepBtn" aria-label="Шаг" disabled>
+          <button class="btn" id="stepBtn" aria-label="Step" disabled>
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
-            Шаг
+            Step
           </button>
-          <button class="btn btn-danger" id="stopBtn" aria-label="Остановить" disabled>
+          <button class="btn btn-danger" id="stopBtn" aria-label="Stop" disabled>
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
-            Стоп
+            Stop
           </button>
-          <button class="btn btn-positive" id="continueBtn" aria-label="Искать ещё" hidden
-                  title="Прогон завершён, но можно продолжить: вдруг найдётся другой или ещё более короткий ответ">
-            Искать ещё
+          <button class="btn btn-positive" id="continueBtn" aria-label="Keep searching" hidden
+                  title="The run finished, but you can continue: maybe another, or an even shorter, formula will turn up">
+            Keep searching
           </button>
         </div>
         <label class="seed field-inline">
           <span class="field-label">Seed</span>
           <input type="text" id="seedInput" class="input seed-field"
                  inputmode="numeric" pattern="[0-9]*" maxlength="10"
-                 placeholder="случайный" autocomplete="off"
-                 title="Пусто — новый случайный сид на каждый прогон; число — воспроизводимый прогон с тем же результатом">
+                 placeholder="random" autocomplete="off"
+                 title="Empty — a new random seed for every run; a number — a reproducible run with the same result">
         </label>
         <label class="speed field-inline">
-          <span class="field-label">Скорость</span>
+          <span class="field-label">Speed</span>
           <input type="range" id="speedRange" min="1" max="100" step="1" value="100">
-          <span class="num" id="speedValue">100 поколений/с</span>
+          <span class="num" id="speedValue">100 generations/s</span>
         </label>
       </div>
-      <div class="ops-row" id="opsRow" role="group" aria-label="Операции, доступные эволюции">
-        <span class="ops-label">Операции формул
-          <span class="ops-hint">изменения применяются к следующему запуску</span>
+      <div class="ops-row" id="opsRow" role="group" aria-label="Operations available to evolution">
+        <span class="ops-label">Formula operations
+          <span class="ops-hint">changes apply to the next run</span>
         </span>
         <div class="ops-groups">
           <div class="ops-group">
-            <span class="ops-group-name clickable-group" id="groupBasic" role="button" tabindex="0" title="Включить/выключить все базовые">Базовые</span>
+            <span class="ops-group-name clickable-group" id="groupBasic" role="button" tabindex="0" title="Toggle all basic">Basic</span>
             <div class="op-chips">
-              <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
-              <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
-              <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="умножение">×</button>
-              <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="деление">÷</button>
-              <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="возведение в степень">xʸ</button>
+              <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="addition">+</button>
+              <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="subtraction">−</button>
+              <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="multiplication">×</button>
+              <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="division">÷</button>
+              <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="exponentiation">xʸ</button>
             </div>
           </div>
           <div class="ops-group">
-            <span class="ops-group-name clickable-group" id="groupAdvanced" role="button" tabindex="0" title="Включить/выключить все расширенные">Расширенные</span>
+            <span class="ops-group-name clickable-group" id="groupAdvanced" role="button" tabindex="0" title="Toggle all advanced">Advanced</span>
             <div class="op-chips">
-              <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="квадратный корень">√</button>
-              <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="кубический корень">∛</button>
-              <button type="button" class="op-chip" data-op="fact" aria-pressed="false" title="факториал">!</button>
-              <button type="button" class="op-chip" data-op="abs" aria-pressed="false" title="модуль числа">|x|</button>
-              <button type="button" class="op-chip" data-op="floor" aria-pressed="false" title="округление вниз">⌊x⌋</button>
-              <button type="button" class="op-chip" data-op="mod" aria-pressed="false" title="остаток от деления (mod)">%</button>
-              <button type="button" class="op-chip" data-op="if" aria-pressed="false" title="разветвление: если условие, то одно, иначе другое">if</button>
-              <button type="button" class="op-chip" data-op="sin" aria-pressed="false" title="синус">sin</button>
-              <button type="button" class="op-chip" data-op="cos" aria-pressed="false" title="косинус">cos</button>
-              <button type="button" class="op-chip" data-op="tan" aria-pressed="false" title="тангенс">tan</button>
-              <button type="button" class="op-chip" data-op="ln" aria-pressed="false" title="натуральный логарифм">ln</button>
-              <button type="button" class="op-chip" data-op="pi" aria-pressed="false" title="число π">π</button>
-              <button type="button" class="op-chip" data-op="e" aria-pressed="false" title="число e">e</button>
+              <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="square root">√</button>
+              <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="cube root">∛</button>
+              <button type="button" class="op-chip" data-op="fact" aria-pressed="false" title="factorial">!</button>
+              <button type="button" class="op-chip" data-op="abs" aria-pressed="false" title="absolute value">|x|</button>
+              <button type="button" class="op-chip" data-op="floor" aria-pressed="false" title="floor">⌊x⌋</button>
+              <button type="button" class="op-chip" data-op="mod" aria-pressed="false" title="remainder (mod)">%</button>
+              <button type="button" class="op-chip" data-op="if" aria-pressed="false" title="branch: if the condition holds, one value, otherwise the other">if</button>
+              <button type="button" class="op-chip" data-op="sin" aria-pressed="false" title="sine">sin</button>
+              <button type="button" class="op-chip" data-op="cos" aria-pressed="false" title="cosine">cos</button>
+              <button type="button" class="op-chip" data-op="tan" aria-pressed="false" title="tangent">tan</button>
+              <button type="button" class="op-chip" data-op="ln" aria-pressed="false" title="natural logarithm">ln</button>
+              <button type="button" class="op-chip" data-op="pi" aria-pressed="false" title="pi">π</button>
+              <button type="button" class="op-chip" data-op="e" aria-pressed="false" title="e">e</button>
             </div>
           </div>
-          <span class="field-hint" id="opsWarn" hidden>нужна хотя бы одна операция</span>
+          <span class="field-hint" id="opsWarn" hidden>at least one operation is required</span>
           <span class="field-hint ops-req" id="opsReq" hidden></span>
         </div>
       </div>
     </section>
 
     <!-- ===== Live search ===== -->
-    <section class="panel live-panel" aria-label="Текущий поиск">
+    <section class="panel live-panel" aria-label="Current search">
       <div class="panel-head">
-        <h2 class="panel-title">Текущий поиск</h2>
+        <h2 class="panel-title">Current search</h2>
         <span class="head-right">
-          <span class="chip" id="liveChip">нет прогона</span>
+          <span class="chip" id="liveChip">no run</span>
         </span>
       </div>
       <div class="error-note" id="errorNote" hidden></div>
       <div class="solved-note" id="solvedNote"></div>
       <div class="live-empty" id="liveEmpty">
-        Здесь появится поиск после ввода последовательности или выбора загадки.
+        A search will appear here after you type a sequence or pick a puzzle.
       </div>
       <div class="live-grid" id="liveGrid" hidden>
         <div class="formula-hero">
           <div class="hero-main">
-            <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Лучшая формула</span>
-              <button class="btn" id="evoBtn" hidden title="Показать, как менялась лучшая формула от поколения к поколению">Проиграть эволюцию</button>
+            <div class="hero-label"><span class="hero-dot"></span><span id="heroLabel">Best formula</span>
+              <button class="btn" id="evoBtn" hidden title="Show how the best formula changed from generation to generation">Replay evolution</button>
             </div>
             <div class="hero-formula" id="bestFormula" aria-live="polite"
                  role="button" tabindex="0"
-                 title="Копировать формулу"></div>
+                 title="Copy formula"></div>
             <div class="hero-sub num" id="bestSub"></div>
-            <span class="copy-badge" id="copyBadge" hidden>скопировано</span>
+            <span class="copy-badge" id="copyBadge" hidden>copied</span>
           </div>
           <div class="hero-chart" id="heroChart"
-               title="Формула (линия) против последовательности (точки)"></div>
+               title="Formula (line) vs the sequence (dots)"></div>
         </div>
         <div class="kpi-strip" id="kpiStrip">
-          <div class="kpi" data-tip="Номер шага эволюции: каждое поколение отбирает лучшие формулы и выводит из них следующее поколение">
-            <span class="kpi-label">Поколение</span><span class="kpi-value num" id="kpiGen">—</span></div>
-          <div class="kpi" data-tip="Насколько лучшая формула промахивается в среднем по всем членам; 0% — точное совпадение по значениям">
-            <span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="kpiError">—</span></div>
-          <div class="kpi" data-tip="Размер формулы: число элементов в ней (числа, операторы, переменные). Чем меньше, тем проще формула. По нему выбирают чемпиона зала славы.">
-            <span class="kpi-label">Размер формулы</span><span class="kpi-value num" id="kpiSize">—</span></div>
-          <div class="kpi" data-tip="Доля уникальных формул (и их абсолютное число); 100% — все разные, 0% — выродились в копии">
-            <span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
-          <div class="kpi" data-tip="Сколько формул эволюция успела проверить с начала прогона">
-            <span class="kpi-label">Проверено формул</span><span class="kpi-value num" id="kpiEvaluated">—</span></div>
-          <div class="kpi" data-tip="Фактическая скорость поиска и длительность текущего прогона">
-            <span class="kpi-label">Скорость / время</span><span class="kpi-value num kpi-small" id="kpiSpeedTime">—</span></div>
+          <div class="kpi" data-tip="The evolution's step counter: every generation selects the best formulas and breeds the next generation from them">
+            <span class="kpi-label">Generation</span><span class="kpi-value num" id="kpiGen">—</span></div>
+          <div class="kpi" data-tip="How far the best formula misses on average across all members; 0% — an exact match by values">
+            <span class="kpi-label">Error (best)</span><span class="kpi-value num" id="kpiError">—</span></div>
+          <div class="kpi" data-tip="Formula size: the number of elements in it (numbers, operators, variables). The smaller, the simpler the formula. It picks the hall-of-fame champion.">
+            <span class="kpi-label">Formula size</span><span class="kpi-value num" id="kpiSize">—</span></div>
+          <div class="kpi" data-tip="The share of unique formulas (and their absolute count); 100% — all different, 0% — degenerated into copies">
+            <span class="kpi-label">Diversity</span><span class="kpi-value num kpi-teal" id="kpiDiversity">—</span></div>
+          <div class="kpi" data-tip="How many formulas evolution has checked since the run started">
+            <span class="kpi-label">Formulas checked</span><span class="kpi-value num" id="kpiEvaluated">—</span></div>
+          <div class="kpi" data-tip="The actual search speed and the current run's duration">
+            <span class="kpi-label">Speed / time</span><span class="kpi-value num kpi-small" id="kpiSpeedTime">—</span></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3 class="chart-title">Fitness по поколениям</h3></div>
+          <div class="chart-head"><h3 class="chart-title">Fitness by generation</h3></div>
           <div class="chart" id="chartFitness"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3 class="chart-title">Ошибка по поколениям</h3></div>
+          <div class="chart-head"><h3 class="chart-title">Error by generation</h3></div>
           <div class="chart" id="chartError"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3 class="chart-title">Разнообразие популяции</h3></div>
+          <div class="chart-head"><h3 class="chart-title">Population diversity</h3></div>
           <div class="chart" id="chartDiversity"></div>
         </div>
         <div class="chart-card">
           <div class="chart-head">
-            <h3 class="chart-title">Размеры деревьев</h3>
-            <p class="chart-note">Распределение формул по размеру: по горизонтали — число узлов,
-            по вертикали — сколько таких формул в популяции</p>
+            <h3 class="chart-title">Tree sizes</h3>
+            <p class="chart-note">Formula size distribution: horizontally — node count,
+            vertically — how many such formulas are in the population</p>
           </div>
           <div class="chart" id="chartSizes"></div>
         </div>
         <div class="terms-card">
           <div class="chart-head">
-            <h3 class="chart-title">Проверка формулы по числам</h3>
-            <p class="chart-note">Формула по очереди подставляется в 1-е, 2-е, 3-е… число
-            последовательности. «Получается» — что формула выдаёт, «должно быть» — что нужно,
-            «расхождение» — промах (зелёное — совпало)</p>
+            <h3 class="chart-title">Formula check by numbers</h3>
+            <p class="chart-note">The formula is substituted into the 1st, 2nd, 3rd… number of
+            the sequence in turn. «Got» — what the formula yields, «expected» — what is needed,
+            «diff» — the miss (green — a hit)</p>
           </div>
           <div class="terms-wrap">
             <table class="terms-table" id="termsTable">
@@ -226,9 +226,9 @@
           <div class="terms-empty" id="termsEmpty" hidden>—</div>
         </div>
         <div class="race-card">
-          <div class="chart-head"><h3 class="chart-title">Топ формул поколения</h3></div>
+          <div class="chart-head"><h3 class="chart-title">Generation's top formulas</h3></div>
           <ol class="race-list" id="raceList"></ol>
-          <div class="chart-head race-log-head"><h3 class="chart-title">Хроника поиска</h3></div>
+          <div class="chart-head race-log-head"><h3 class="chart-title">Search log</h3></div>
           <ul class="race-log" id="raceLog"></ul>
         </div>
       </div>
@@ -236,109 +236,109 @@
   </section>
 
   <!-- ===== Curves: draw a shape, evolve x(t)/y(t) to fit it ===== -->
-  <section id="paneCurves" hidden aria-label="Кривые">
+  <section id="paneCurves" hidden aria-label="Curves">
     <div class="curves-grid">
-      <section class="panel curve-draw-panel" aria-label="Рисование цели">
+      <section class="panel curve-draw-panel" aria-label="Drawing the target">
         <div class="panel-head">
-          <h2 class="panel-title">Рисунок</h2>
-          <span class="head-right"><span class="chip" id="curveChip">нет прогона</span></span>
+          <h2 class="panel-title">Drawing</h2>
+          <span class="head-right"><span class="chip" id="curveChip">no run</span></span>
         </div>
-        <p class="field-hint">Зажмите мышь и ведите — штрих превратится в точки цели.
-          Каждый новый зажим начинает отдельный штрих (до 12), у каждого
-          штриха — своя пара формул x(t), y(t). Одиночный клик ставит
-          точку. Серые точки — ваша цель, индиго-линии — лучшие кривые.</p>
-        <div class="preset-row" id="presetRow" role="group" aria-label="Готовые фигуры">
-          <span class="ops-label">Заготовки</span>
+        <p class="field-hint">Press and drag — the stroke becomes the target's points.
+          Every new press starts a separate stroke (up to 12), each with
+          its own pair of formulas x(t), y(t). A single click places a
+          point. Grey dots — your target, indigo lines — the best curves.</p>
+        <div class="preset-row" id="presetRow" role="group" aria-label="Ready-made shapes">
+          <span class="ops-label">Presets</span>
           <!-- preset buttons are built by JS from CURVE_PRESETS -->
         </div>
-        <div class="preset-row" role="group" aria-label="Мои фигуры">
-          <span class="ops-label">Мои фигуры</span>
+        <div class="preset-row" role="group" aria-label="My shapes">
+          <span class="ops-label">My shapes</span>
           <select id="curveMySel" class="input puzzle-filter-select"
-                  title="Сохранённые рисунки (лежат на сервере, доступны в любом браузере)">
-            <option value="">— загрузить фигуру —</option>
+                  title="Saved drawings (stored on the server, available in any browser)">
+            <option value="">— load a shape —</option>
           </select>
           <input type="text" id="curveSaveName" class="input seed-field"
-                 maxlength="60" placeholder="имя фигуры" autocomplete="off"
-                 title="Как назвать рисунок при сохранении"
-                 aria-label="Имя сохраняемой фигуры">
-          <button class="btn" id="curveSaveBtn" title="Сохранить текущий рисунок на сервер">Сохранить</button>
+                 maxlength="60" placeholder="shape name" autocomplete="off"
+                 title="What to call the drawing when saving"
+                 aria-label="Name of the shape being saved">
+          <button class="btn" id="curveSaveBtn" title="Save the current drawing to the server">Save</button>
           <button class="btn" id="curveDelBtn" disabled
-                  title="Удалить выбранный рисунок с сервера">Удалить</button>
+                  title="Delete the selected drawing from the server">Delete</button>
           <button class="btn" id="curveExportBtn" disabled
-                  title="Скачать все сохранённые рисунки одним JSON-файлом">Экспорт</button>
+                  title="Download all saved drawings as one JSON file">Export</button>
         </div>
         <div class="curve-canvas-wrap">
           <canvas id="curveCanvas" width="800" height="800"
-                  aria-label="Поле для рисования кривой"></canvas>
+                  aria-label="Curve drawing canvas"></canvas>
         </div>
         <div class="run-controls" id="curveControls">
-          <div class="control-group" role="group" aria-label="Управление поиском кривой">
+          <div class="control-group" role="group" aria-label="Curve search controls">
             <button class="btn btn-primary" id="curveStartBtn">
               <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-              Запустить
+              Run
             </button>
             <button class="btn btn-danger" id="curveStopBtn" disabled>
               <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
-              Стоп
+              Stop
             </button>
           </div>
-          <div class="control-group" role="group" aria-label="Инструменты рисования">
-            <button class="btn" id="curveUndoBtn" disabled title="Убрать последний штрих">Отменить штрих</button>
+          <div class="control-group" role="group" aria-label="Drawing tools">
+            <button class="btn" id="curveUndoBtn" disabled title="Undo the last stroke">Undo stroke</button>
             <button class="btn" id="curvePlayBtn" disabled
-                    title="Проиграть найденную кривую: линии рисуются так, будто их ведёт перо">Проиграть</button>
+                    title="Play the found curve: the lines are drawn as if guided by a pen">Play</button>
             <button class="btn" id="curveEraseBtn" aria-pressed="false"
-                    title="Ластик: зажмите и ведите по холсту — точки рисунка рядом с курсором стираются">Ластик</button>
-            <button class="btn" id="curveClearBtn">Очистить</button>
+                    title="Eraser: press and drag across the canvas — drawing points near the cursor are erased">Eraser</button>
+            <button class="btn" id="curveClearBtn">Clear</button>
             <button class="btn" id="curveSmoothBtn" aria-pressed="false"
-                    title="Смягчать углы штрихов при рисовании (только в свободном режиме)">Сгладить</button>
+                    title="Soften stroke corners while drawing (free-draw mode only)">Smooth</button>
             <select id="curveGridSel" class="input puzzle-filter-select"
-                    title="Привязка рисования к узлам сетки: линию проще провести ровно"
-                    aria-label="Размер сетки для привязки рисования">
-              <option value="0">свободное рисование</option>
-              <option value="8">сетка 8×8</option>
-              <option value="12">сетка 12×12</option>
-              <option value="16">сетка 16×16</option>
-              <option value="24">сетка 24×24</option>
-              <option value="32">сетка 32×32</option>
+                    title="Snap drawing to grid nodes: easier to draw a straight line"
+                    aria-label="Grid size for drawing snap">
+              <option value="0">free drawing</option>
+              <option value="8">8×8 grid</option>
+              <option value="12">12×12 grid</option>
+              <option value="16">16×16 grid</option>
+              <option value="24">24×24 grid</option>
+              <option value="32">32×32 grid</option>
             </select>
           </div>
           <label class="seed field-inline">
             <span class="field-label">Seed</span>
             <input type="text" id="curveSeedInput" class="input seed-field"
-                   inputmode="numeric" maxlength="10" placeholder="случайный"
+                   inputmode="numeric" maxlength="10" placeholder="random"
                    autocomplete="off"
-                   title="Пусто — новый случайный сид; число — воспроизводимый прогон">
+                   title="Empty — a new random seed; a number — a reproducible run">
           </label>
         </div>
-        <div class="ops-row ops-row-compact" role="group" aria-label="Операции для кривых">
-          <span class="ops-label">Операции формул</span>
+        <div class="ops-row ops-row-compact" role="group" aria-label="Operations for curves">
+          <span class="ops-label">Formula operations</span>
           <div class="ops-groups">
             <div class="ops-group">
-              <span class="ops-group-name clickable-group" role="button" tabindex="0" title="Включить/выключить все базовые">Базовые</span>
+              <span class="ops-group-name clickable-group" role="button" tabindex="0" title="Toggle all basic">Basic</span>
               <div class="op-chips">
-                <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="сложение">+</button>
-                <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="вычитание">−</button>
-                <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="умножение">×</button>
-                <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="деление">÷</button>
-                <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="возведение в степень">xʸ</button>
+                <button type="button" class="op-chip" data-op="+" aria-pressed="true" title="addition">+</button>
+                <button type="button" class="op-chip" data-op="-" aria-pressed="true" title="subtraction">−</button>
+                <button type="button" class="op-chip" data-op="*" aria-pressed="true" title="multiplication">×</button>
+                <button type="button" class="op-chip" data-op="/" aria-pressed="true" title="division">÷</button>
+                <button type="button" class="op-chip" data-op="^" aria-pressed="true" title="exponentiation">xʸ</button>
               </div>
             </div>
             <div class="ops-group">
-              <span class="ops-group-name clickable-group" role="button" tabindex="0" title="Включить/выключить все расширенные">Расширенные</span>
+              <span class="ops-group-name clickable-group" role="button" tabindex="0" title="Toggle all advanced">Advanced</span>
               <div class="op-chips">
-                <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="квадратный корень">√</button>
-                <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="кубический корень">∛</button>
-                <button type="button" class="op-chip" data-op="fact" aria-pressed="false" title="факториал">!</button>
-                <button type="button" class="op-chip" data-op="abs" aria-pressed="false" title="модуль числа">|x|</button>
-                <button type="button" class="op-chip" data-op="floor" aria-pressed="false" title="округление вниз">⌊x⌋</button>
-                <button type="button" class="op-chip" data-op="mod" aria-pressed="false" title="остаток от деления (mod)">%</button>
-                <button type="button" class="op-chip" data-op="if" aria-pressed="false" title="разветвление: если условие, то одно, иначе другое">if</button>
-                <button type="button" class="op-chip" data-op="sin" aria-pressed="false" title="синус">sin</button>
-                <button type="button" class="op-chip" data-op="cos" aria-pressed="false" title="косинус">cos</button>
-                <button type="button" class="op-chip" data-op="tan" aria-pressed="false" title="тангенс">tan</button>
-                <button type="button" class="op-chip" data-op="ln" aria-pressed="false" title="натуральный логарифм">ln</button>
-                <button type="button" class="op-chip" data-op="pi" aria-pressed="false" title="число π">π</button>
-                <button type="button" class="op-chip" data-op="e" aria-pressed="false" title="число e">e</button>
+                <button type="button" class="op-chip" data-op="sqrt" aria-pressed="false" title="square root">√</button>
+                <button type="button" class="op-chip" data-op="cbrt" aria-pressed="false" title="cube root">∛</button>
+                <button type="button" class="op-chip" data-op="fact" aria-pressed="false" title="factorial">!</button>
+                <button type="button" class="op-chip" data-op="abs" aria-pressed="false" title="absolute value">|x|</button>
+                <button type="button" class="op-chip" data-op="floor" aria-pressed="false" title="floor">⌊x⌋</button>
+                <button type="button" class="op-chip" data-op="mod" aria-pressed="false" title="remainder (mod)">%</button>
+                <button type="button" class="op-chip" data-op="if" aria-pressed="false" title="branch: if the condition holds, one value, otherwise the other">if</button>
+                <button type="button" class="op-chip" data-op="sin" aria-pressed="false" title="sine">sin</button>
+                <button type="button" class="op-chip" data-op="cos" aria-pressed="false" title="cosine">cos</button>
+                <button type="button" class="op-chip" data-op="tan" aria-pressed="false" title="tangent">tan</button>
+                <button type="button" class="op-chip" data-op="ln" aria-pressed="false" title="natural logarithm">ln</button>
+                <button type="button" class="op-chip" data-op="pi" aria-pressed="false" title="pi">π</button>
+                <button type="button" class="op-chip" data-op="e" aria-pressed="false" title="e">e</button>
               </div>
             </div>
           </div>
@@ -347,65 +347,65 @@
         <div class="solved-note" id="curveNote"></div>
       </section>
 
-      <section class="panel curve-live-panel" aria-label="Текущий поиск кривой">
+      <section class="panel curve-live-panel" aria-label="Current curve search">
         <div class="panel-head">
-          <h2 class="panel-title">Текущий поиск</h2>
+          <h2 class="panel-title">Current search</h2>
         </div>
         <div class="live-empty" id="curveEmpty">
-          Нарисуйте фигуру слева и запустите поиск: эволюция подберёт пару
-          формул x(t) и y(t), кривая которых повторяет рисунок.
+          Draw a shape on the left and start the search: evolution will fit a pair
+          of formulas x(t) and y(t) whose curve repeats the drawing.
         </div>
         <div id="curveLive" hidden class="live-grid">
           <div class="formula-hero curve-hero">
             <div class="hero-main">
-              <div class="hero-label"><span class="hero-dot"></span><span>Лучшие формулы</span></div>
+              <div class="hero-label"><span class="hero-dot"></span><span>Best formulas</span></div>
               <div id="curveFormulas" aria-live="polite"></div>
               <div class="hero-sub num" id="curveSub"></div>
             </div>
           </div>
           <div class="kpi-strip">
-            <div class="kpi" data-tip="Номер шага эволюции: каждое поколение отбирает лучшие пары формул и выводит из них следующее поколение">
-              <span class="kpi-label">Поколение</span><span class="kpi-value num" id="curveGen">—</span></div>
-            <div class="kpi" data-tip="Средний промах кривой мимо точек рисунка (в обе стороны), доля от размера поля; 2% — считается решённым">
-              <span class="kpi-label">Ошибка (лучшая)</span><span class="kpi-value num" id="curveError">—</span></div>
-            <div class="kpi" data-tip="Суммарный размер двух формул x(t) и y(t); чем меньше, тем проще пара">
-              <span class="kpi-label">Размер пары</span><span class="kpi-value num" id="curveSize">—</span></div>
-            <div class="kpi" data-tip="Доля уникальных кривых в популяции; 100% — все разные, 0% — выродились в копии">
-              <span class="kpi-label">Разнообразие</span><span class="kpi-value num kpi-teal" id="curveDiversity">—</span></div>
-            <div class="kpi" data-tip="Фактическая скорость поиска и длительность текущего прогона">
-              <span class="kpi-label">Скорость / время</span><span class="kpi-value num kpi-small" id="curveSpeedTime">—</span></div>
+            <div class="kpi" data-tip="The evolution's step counter: every generation selects the best formula pairs and breeds the next generation from them">
+              <span class="kpi-label">Generation</span><span class="kpi-value num" id="curveGen">—</span></div>
+            <div class="kpi" data-tip="The curve's average miss past the drawing's points (both ways), a share of the field size; 2% counts as solved">
+              <span class="kpi-label">Error (best)</span><span class="kpi-value num" id="curveError">—</span></div>
+            <div class="kpi" data-tip="The total size of the two formulas x(t) and y(t); the smaller, the simpler the pair">
+              <span class="kpi-label">Pair size</span><span class="kpi-value num" id="curveSize">—</span></div>
+            <div class="kpi" data-tip="The share of unique curves in the population; 100% — all different, 0% — degenerated into copies">
+              <span class="kpi-label">Diversity</span><span class="kpi-value num kpi-teal" id="curveDiversity">—</span></div>
+            <div class="kpi" data-tip="The actual search speed and the current run's duration">
+              <span class="kpi-label">Speed / time</span><span class="kpi-value num kpi-small" id="curveSpeedTime">—</span></div>
           </div>
           <div class="chart-card">
-            <div class="chart-head"><h3 class="chart-title">Fitness по поколениям</h3></div>
+            <div class="chart-head"><h3 class="chart-title">Fitness by generation</h3></div>
             <div class="chart" id="chartCurveFitness"></div>
           </div>
           <div class="chart-card">
-            <div class="chart-head"><h3 class="chart-title">Ошибка по поколениям</h3></div>
+            <div class="chart-head"><h3 class="chart-title">Error by generation</h3></div>
             <div class="chart" id="chartCurveError"></div>
           </div>
           <div class="chart-card">
-            <div class="chart-head"><h3 class="chart-title">Разнообразие популяции</h3></div>
+            <div class="chart-head"><h3 class="chart-title">Population diversity</h3></div>
             <div class="chart" id="chartCurveDiversity"></div>
           </div>
           <div class="chart-card">
             <div class="chart-head">
-              <h3 class="chart-title">Размеры пар</h3>
-              <p class="chart-note">Распределение пар формул по суммарному размеру x(t)+y(t):
-              по горизонтали — размер, по вертикали — сколько таких пар в популяции</p>
+              <h3 class="chart-title">Pair sizes</h3>
+              <p class="chart-note">Formula-pair distribution by the total size x(t)+y(t):
+              horizontally — size, vertically — how many such pairs are in the population</p>
             </div>
             <div class="chart" id="chartCurveSizes"></div>
           </div>
           <div class="race-card">
-            <div class="chart-head"><h3 class="chart-title">Топ пар поколения</h3></div>
+            <div class="chart-head"><h3 class="chart-title">Generation's top pairs</h3></div>
             <ol class="race-list" id="curveRaceList"></ol>
-            <div class="chart-head race-log-head"><h3 class="chart-title">Хроника поиска</h3></div>
+            <div class="chart-head race-log-head"><h3 class="chart-title">Search log</h3></div>
             <ul class="race-log" id="curveRaceLog"></ul>
           </div>
           <div class="terms-card">
             <div class="chart-head">
-              <h3 class="chart-title">Проверка кривой по t</h3>
-              <p class="chart-note">Кривая по очереди вычисляется в шести точках параметра t.
-              «Промах» — расстояние от точки кривой до ближайшей точки рисунка (доля от размера поля)</p>
+              <h3 class="chart-title">Curve check by t</h3>
+              <p class="chart-note">The curve is evaluated at six points of the parameter t in turn.
+              «Miss» — the distance from a curve point to the nearest drawing point (a share of the field size)</p>
             </div>
             <div class="terms-wrap">
               <table class="terms-table" id="curveTermsTable">
@@ -422,14 +422,14 @@
       </section>
     </div>
 
-    <section class="panel curve-history-panel" aria-label="Галерея кривых">
+    <section class="panel curve-history-panel" aria-label="Curve gallery">
       <div class="panel-head">
-        <h2 class="panel-title">Галерея кривых</h2>
-        <span class="panel-meta">завершённые прогоны; клик по строке — вернуть рисунок на холст</span>
+        <h2 class="panel-title">Curve gallery</h2>
+        <span class="panel-meta">finished runs; click a row to put its drawing back on the canvas</span>
       </div>
       <div class="table-scroll">
         <table class="list-table" id="curveTable">
-        <thead><tr><th>Дата</th><th>Формулы</th><th class="num">Ошибка</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
+        <thead><tr><th>Date</th><th>Formulas</th><th class="num">Error</th><th class="num">Generations</th><th class="num">Time</th></tr></thead>
         <tbody id="curveRows"></tbody>
       </table>
       </div>
@@ -437,73 +437,73 @@
   </section>
 
   <!-- ===== Results: history / hall / curiosities ===== -->
-  <section id="paneResults" hidden aria-label="Результаты">
-    <section class="panel results-panel" aria-label="Результаты">
+  <section id="paneResults" hidden aria-label="Results">
+    <section class="panel results-panel" aria-label="Results">
       <div class="panel-head">
-        <h2 class="panel-title">Результаты</h2>
+        <h2 class="panel-title">Results</h2>
         <span class="panel-meta" id="resultsMeta"></span>
       </div>
-      <div class="stats-card" id="statsCard" aria-label="Сводка по библиотеке">
+      <div class="stats-card" id="statsCard" aria-label="Library summary">
         <div class="stats-top">
           <span class="stats-headline" id="statsHeadline">—</span>
         </div>
         <div class="stats-tiers" id="statsTiers"></div>
       </div>
       <div class="results-controls">
-        <div class="tabs" role="tablist" aria-label="Результаты">
-          <button class="tab" role="tab" id="tabLibrary" aria-selected="true">Библиотека</button>
-          <button class="tab" role="tab" id="tabShapes" aria-selected="false">Фигуры</button>
-          <button class="tab" role="tab" id="tabMySeqs" aria-selected="false">Мои последовательности</button>
-          <button class="tab" role="tab" id="tabCurio" aria-selected="false">Курьёзы</button>
+        <div class="tabs" role="tablist" aria-label="Results">
+          <button class="tab" role="tab" id="tabLibrary" aria-selected="true">Library</button>
+          <button class="tab" role="tab" id="tabShapes" aria-selected="false">Shapes</button>
+          <button class="tab" role="tab" id="tabMySeqs" aria-selected="false">My sequences</button>
+          <button class="tab" role="tab" id="tabCurio" aria-selected="false">Curiosities</button>
         </div>
         <div class="table-tools">
-          <select id="tableFilter" class="input table-search" style="width: 160px;" title="Фильтр отображаемых строк (влияет на Автопилот)">
-            <option value="all">Все</option>
-            <option value="unsolved">Нерешённые</option>
-            <option value="solved">Решённые</option>
-            <option value="easy">Только лёгкие</option>
-            <option value="medium">Только средние</option>
-            <option value="hard">Только сложные</option>
+          <select id="tableFilter" class="input table-search" style="width: 160px;" title="Filter of displayed rows (affects Autopilot)">
+            <option value="all">All</option>
+            <option value="unsolved">Unsolved</option>
+            <option value="solved">Solved</option>
+            <option value="easy">Easy only</option>
+            <option value="medium">Medium only</option>
+            <option value="hard">Hard only</option>
           </select>
-          <button class="btn btn-positive" id="autopilotBtn" title="Запустить поиск для всех видимых строк в текущем порядке">
-            Автопилот
+          <button class="btn btn-positive" id="autopilotBtn" title="Run the search for every visible row in the current order">
+            Autopilot
           </button>
-          <input type="search" id="tableSearch" class="input table-search" placeholder="Поиск по таблице...">
-          <button class="btn" id="exportBtn" title="Скачать всю историю прогонов (все вкладки) в формате JSON">
+          <input type="search" id="tableSearch" class="input table-search" placeholder="Search the table…">
+          <button class="btn" id="exportBtn" title="Download the whole run history (all tabs) as JSON">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Экспорт истории
+            Export history
           </button>
         </div>
       </div>
       <div class="tab-body" id="tabBody">
         <div class="table-scroll">
           <table class="list-table" id="libraryTable">
-          <thead><tr><th>Последовательность</th><th>Эталон</th><th>Лучший результат</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
+          <thead><tr><th>Sequence</th><th>Reference</th><th>Best result</th><th class="num">Error</th><th class="num">Generations</th></tr></thead>
           <tbody id="libraryRows"></tbody>
         </table>
         </div>
         <div class="table-scroll">
           <table class="list-table" id="shapeTable" hidden>
-          <thead><tr><th>Фигура</th><th>Лучшие формулы</th><th class="num">Ошибка</th><th class="num">Поколений</th><th class="num">Время</th></tr></thead>
+          <thead><tr><th>Shape</th><th>Best formulas</th><th class="num">Error</th><th class="num">Generations</th><th class="num">Time</th></tr></thead>
           <tbody id="shapeRows"></tbody>
         </table>
         </div>
         <div class="table-scroll">
           <table class="list-table" id="mySeqTable" hidden>
-          <thead><tr><th>Последовательность</th><th>Мой эталон</th><th>Лучший результат</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
+          <thead><tr><th>Sequence</th><th>My reference</th><th>Best result</th><th class="num">Error</th><th class="num">Generations</th></tr></thead>
           <tbody id="mySeqRows"></tbody>
         </table>
         </div>
         <div class="table-scroll">
           <table class="list-table" id="curioTable" hidden>
-          <thead><tr><th>Последовательность</th><th>Формула</th><th class="num">Размер</th><th class="num">Ошибка</th><th class="num">Поколение</th></tr></thead>
+          <thead><tr><th>Sequence</th><th>Formula</th><th class="num">Size</th><th class="num">Error</th><th class="num">Generation</th></tr></thead>
           <tbody id="curioRows"></tbody>
         </table>
         </div>
         <div class="table-scroll">
           <table class="list-table" id="curveCurioTable" hidden>
           <caption class="field-hint" id="curveCurioCaption"></caption>
-          <thead><tr><th>Фигура</th><th>Кривые</th><th class="num">Ошибка</th><th class="num">Поколений</th></tr></thead>
+          <thead><tr><th>Shape</th><th>Curves</th><th class="num">Error</th><th class="num">Generations</th></tr></thead>
           <tbody id="curveCurioRows"></tbody>
         </table>
         </div>
@@ -512,99 +512,108 @@
   </section>
 
   <!-- ===== Settings: engine knobs ===== -->
-  <section id="paneSettings" hidden aria-label="Настройки">
-    <section class="panel settings-panel" aria-label="Настройки движка">
+  <section id="paneSettings" hidden aria-label="Settings">
+    <section class="panel settings-panel" aria-label="Engine settings">
       <div class="panel-head">
-        <h2 class="panel-title">Настройки</h2>
-        <span class="panel-meta" id="settingsMeta">применяются к следующим запускам, хранятся локально</span>
+        <h2 class="panel-title">Settings</h2>
+        <span class="panel-meta" id="settingsMeta">apply to the next runs, stored locally</span>
       </div>
       <form id="settingsForm" class="settings-form">
-        <h3 class="settings-section-title">Параметры поиска</h3>
+        <h3 class="settings-section-title">Search parameters</h3>
         <div class="settings-grid">
           <label class="field">
-            <span class="field-label">Популяция</span>
+            <span class="field-label">Population</span>
             <input class="input" type="number" id="setPopulation" min="20" max="2000" step="1">
-            <span class="field-hint">20–2000 формул в поколении</span>
+            <span class="field-hint">20–2000 formulas per generation</span>
           </label>
           <label class="field">
-            <span class="field-label">Максимум поколений</span>
+            <span class="field-label">Max generations</span>
             <input class="input" type="number" id="setMaxGenerations" min="10" max="100000" step="1">
-            <span class="field-hint">10–100000; нерешённый прогон закончится ровно на этом числе</span>
+            <span class="field-hint">10–100000; an unsolved run ends exactly at this number</span>
           </label>
           <label class="field">
-            <span class="field-label">Максимальная скорость</span>
+            <span class="field-label">Max speed</span>
             <input class="input" type="number" id="setSpeedMax" min="10" max="240" step="1">
-            <span class="field-hint">поколений/с, верхняя граница ползунка (до 240)</span>
+            <span class="field-hint">generations/s, the slider's upper bound (up to 240)</span>
           </label>
           <label class="field">
-            <span class="field-label">Штраф за размер</span>
+            <span class="field-label">Size penalty</span>
             <input class="input" type="number" id="setParsimony" min="0" max="0.1" step="0.001">
-            <span class="field-hint">0–0.1; выше — короче формулы, но медленнее сходимость</span>
+            <span class="field-hint">0–0.1; higher — shorter formulas, but slower convergence</span>
           </label>
           <label class="field">
-            <span class="field-label">Глубина деревьев</span>
+            <span class="field-label">Tree depth</span>
             <input class="input" type="number" id="setMaxDepth" min="3" max="12" step="1">
-            <span class="field-hint">3–12 узлов в самой длинной ветке</span>
+            <span class="field-hint">3–12 nodes in the longest branch</span>
           </label>
           <label class="field">
-            <span class="field-label">Размер турнира</span>
+            <span class="field-label">Tournament size</span>
             <input class="input" type="number" id="setTournament" min="2" max="16" step="1">
-            <span class="field-hint">2–16; сколько случайных формул борются за отбор</span>
+            <span class="field-hint">2–16; how many random formulas compete for selection</span>
           </label>
           <label class="field">
-            <span class="field-label">Вероятность кроссовера</span>
+            <span class="field-label">Crossover probability</span>
             <input class="input" type="number" id="setPCrossover" min="0" max="1" step="0.05">
-            <span class="field-hint">0–1; доля потомков от скрещивания пар</span>
+            <span class="field-hint">0–1; the share of offspring from crossed pairs</span>
           </label>
           <label class="field">
-            <span class="field-label">Вероятность мутации</span>
+            <span class="field-label">Mutation probability</span>
             <input class="input" type="number" id="setPMutate" min="0" max="1" step="0.05">
-            <span class="field-hint">0–1; доля потомков с мутацией</span>
+            <span class="field-hint">0–1; the share of mutated offspring</span>
           </label>
           <label class="field">
-            <span class="field-label">Элита</span>
+            <span class="field-label">Elitism</span>
             <input class="input" type="number" id="setElitism" min="0" max="20" step="1">
-            <span class="field-hint">0–20; сколько лучших переходят в следующее поколение без изменений</span>
+            <span class="field-hint">0–20; how many of the best carry over unchanged</span>
           </label>
           <label class="field">
-            <span class="field-label">Поколений усадки</span>
+            <span class="field-label">Shrink generations</span>
             <input class="input" type="number" id="setShrinkGenerations" min="0" max="2000" step="1">
-            <span class="field-hint">сколько искать формулу короче после решения</span>
+            <span class="field-hint">how long to keep hunting a shorter formula after a solve</span>
           </label>
           <label class="field">
-            <span class="field-label">Штраф усадки</span>
+            <span class="field-label">Shrink penalty</span>
             <input class="input" type="number" id="setShrinkParsimony" min="0" max="0.2" step="0.005">
-            <span class="field-hint">штраф за размер во время усадки (обычно сильно больше основного)</span>
+            <span class="field-hint">the size penalty during shrinking (usually far larger than the base one)</span>
           </label>
         </div>
 
           <label class="field">
-            <span class="field-label">Поколений в автопилоте</span>
+            <span class="field-label">Autopilot generations</span>
             <input class="input" type="number" id="setAutopilotGens" min="1" max="10000" step="1">
-            <span class="field-hint">Сколько поколений тратить на одну задачу перед переходом к следующей (от 1 до макс. поколений)</span>
+            <span class="field-hint">How many generations to spend on one task before moving to the next (1 to max generations)</span>
           </label>
         </div>
 
-        <h3 class="settings-section-title">Уведомления</h3>
+        <h3 class="settings-section-title">Interface language</h3>
+        <div class="settings-grid">
+          <label class="field">
+            <span class="field-label">Language</span>
+            <select class="input" id="setLang"></select>
+            <span class="field-hint">Detected from the machine's language on first launch; the choice is stored in this browser</span>
+          </label>
+        </div>
+
+        <h3 class="settings-section-title">Notifications</h3>
         <div class="settings-grid">
           <div class="field">
-            <span class="field-label">Способы оповещения</span>
+            <span class="field-label">Notifications</span>
             <div class="notify-toggles">
-              <label class="toggle-label"><input type="checkbox" id="setNotifyFlash"> Мигание вкладки</label>
-              <label class="toggle-label"><input type="checkbox" id="setNotifySound"> Звук</label>
+              <label class="toggle-label"><input type="checkbox" id="setNotifyFlash"> Tab flashing</label>
+              <label class="toggle-label"><input type="checkbox" id="setNotifySound"> Sound</label>
             </div>
             <div class="field-inline" style="margin-top: 12px;">
-              <span class="field-label" style="min-width: 110px;">Громкость звука</span>
+              <span class="field-label" style="min-width: 110px;">Sound volume</span>
               <input type="range" id="setNotifyVolume" min="0" max="1" step="0.05" style="width: 140px;">
               <span class="num" id="setNotifyVolumeVal" style="font-size: var(--fs-small); color: var(--muted);">0.1</span>
             </div>
-            <span class="field-hint">сработают, если вкладка свёрнута или неактивна</span>
+            <span class="field-hint">fire when the tab is minimized or inactive</span>
           </div>
         </div>
 
         <div class="settings-actions">
-          <button type="submit" class="btn btn-primary">Сохранить</button>
-          <button type="button" class="btn btn-danger" id="settingsReset">Сбросить к дефолтам</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn btn-danger" id="settingsReset">Reset to defaults</button>
         </div>
       </form>
     </section>
@@ -615,6 +624,7 @@
 
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
+<script src="/static/i18n.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
